@@ -1,0 +1,35 @@
+{
+  "canvas": [
+    768,
+    512
+  ],
+  "pivot": [
+    384,
+    492
+  ],
+  "scale": 2,
+  "fps": 12,
+  "loop": false,
+  "frames": [
+    {
+      "file": "death_00",
+      "hold": 2,
+      "grounded": true
+    },
+    {
+      "file": "death_01",
+      "hold": 2,
+      "grounded": true
+    },
+    {
+      "file": "death_02",
+      "hold": 2,
+      "grounded": true
+    },
+    {
+      "file": "death_03",
+      "hold": 6,
+      "grounded": true
+    }
+  ]
+}

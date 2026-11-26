@@ -1,0 +1,30 @@
+{
+  "canvas": [
+    768,
+    512
+  ],
+  "pivot": [
+    384,
+    492
+  ],
+  "scale": 2,
+  "fps": 12,
+  "loop": false,
+  "frames": [
+    {
+      "file": "doze_in_00",
+      "hold": 3,
+      "grounded": true
+    },
+    {
+      "file": "doze_in_01",
+      "hold": 3,
+      "grounded": true
+    },
+    {
+      "file": "doze_in_02",
+      "hold": 4,
+      "grounded": true
+    }
+  ]
+}

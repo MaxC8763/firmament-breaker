@@ -1,0 +1,46 @@
+{
+  "canvas": [
+    768,
+    512
+  ],
+  "pivot": [
+    384,
+    492
+  ],
+  "scale": 2,
+  "fps": 12,
+  "loop": false,
+  "select": "by-velocity",
+  "frames": [
+    {
+      "file": "jump_00",
+      "hold": 1,
+      "grounded": true,
+      "role": "takeoff"
+    },
+    {
+      "file": "jump_01",
+      "hold": 1,
+      "grounded": false,
+      "role": "rise"
+    },
+    {
+      "file": "jump_02",
+      "hold": 1,
+      "grounded": false,
+      "role": "apex"
+    },
+    {
+      "file": "jump_03",
+      "hold": 1,
+      "grounded": false,
+      "role": "fall"
+    },
+    {
+      "file": "jump_04",
+      "hold": 1,
+      "grounded": true,
+      "role": "land"
+    }
+  ]
+}

@@ -1,21 +1,21 @@
 #!/usr/bin/env node
 /**
- * 主角佔位圖產生器（放在 repo 的 tools/placeholder/gen-hero.mjs）
+ * 主角佔位圖產生器
  *
- * 用程式畫的 Q 版人類劍士，讓 Claude Code 不必等 Max 的手繪就能把遊戲做完。
- * Max 之後把「同路徑、同檔名」的 2x PNG 放進 art/export/，管線就會逐張改用手繪（規格 §10）。
+ * 用程式畫出 Q 版人類劍士的動作、特效、立繪、cut-in 與地圖圖示，手繪圖還沒畫好之前，遊戲照樣能開發與測試。
+ * 手繪圖以「同路徑、同檔名」的 2x PNG 放進 art/export/，美術管線就會逐張改用手繪。
  *
  * 用法：
- *   npm i -D sharp
+ *   npm run art:placeholder [-- --sheet]
  *   node tools/placeholder/gen-hero.mjs [輸出資料夾，預設 art/placeholder] [--sheet]
  *     --sheet  另外輸出 _preview/sheet_hero.png（每個動作一列，含 hurtbox／判定框）與 _preview/overview.png
  *
- * 規則（與規格 §8、§10 一致）：
+ * 規則：
  * - 主角動作畫布 1x 768×512、腳底 pivot (384, 492)；輸出 2x（1536×1024）。只畫面向右。
  * - grounded 的格自動貼地：最下緣不透明像素（alpha ≥ 128）剛好碰到地平線。
  * - 每個資料夾一份 meta.json；hold＝這張停幾格（12 fps），phase＝startup／active／recovery。
  * - 輸出是產生物，不要手改；要改姿勢就改下面的 ACTIONS 再重跑。
- * - 只會清空帶有 .generated 標記的資料夾；路徑含 export 一律拒絕（那是 Max 的手繪）。
+ * - 只會清空帶有 .generated 標記的資料夾；路徑含 export 一律拒絕（那是手繪圖的資料夾）。
  * - 底線開頭的檔案或資料夾（例如 _preview/）是預覽用，管線應略過。
  */
 import sharp from 'sharp';
@@ -26,7 +26,7 @@ const argv = process.argv.slice(2);
 const OUT = path.resolve(argv.find((a) => !a.startsWith('--')) ?? 'art/placeholder');
 const WANT_SHEET = argv.includes('--sheet');
 if (OUT.split(path.sep).includes('export')) {
-  console.error(`拒絕輸出到 ${OUT}：art/export/ 是 Max 的手繪資料夾`);
+  console.error(`拒絕輸出到 ${OUT}：art/export/ 是手繪圖的資料夾`);
   process.exit(1);
 }
 

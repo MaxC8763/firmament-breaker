@@ -1,0 +1,39 @@
+{
+  "scale": 2,
+  "note": "start＋mid×N＋end 由左到右排；mid 可無縫重複；全部 pivot＝左側中點",
+  "parts": {
+    "start": {
+      "file": "a_beam_start",
+      "canvas": [
+        128,
+        240
+      ],
+      "pivot": [
+        0,
+        120
+      ]
+    },
+    "mid": {
+      "file": "a_beam_mid",
+      "canvas": [
+        256,
+        240
+      ],
+      "pivot": [
+        0,
+        120
+      ]
+    },
+    "end": {
+      "file": "a_beam_end",
+      "canvas": [
+        128,
+        240
+      ],
+      "pivot": [
+        0,
+        120
+      ]
+    }
+  }
+}

@@ -12,13 +12,15 @@
     "build": "vite build",
     "preview": "vite preview",
     "e2e": "playwright test",
-    "smoke": "node tools/smoke.mjs"
+    "smoke": "node tools/smoke.mjs",
+    "art:placeholder": "node tools/placeholder/gen-hero.mjs"
   },
   "dependencies": {
     "phaser": "4.2.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.1",
+    "sharp": "^0.35.5",
     "typescript": "^7.0.2",
     "vite": "^8.4.0",
     "vitest": "^5.1.2"
