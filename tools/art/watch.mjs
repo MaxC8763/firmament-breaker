@@ -27,12 +27,18 @@ export function watchArt(dirs, { delay = 300 } = {}) {
     timer = setTimeout(run, delay);
   };
 
-  // 手繪資料夾可能還不存在：每秒看一次，出現了就開始監看
+  // 手繪資料夾可能還不存在、也可能被刪掉：每秒看一次，出現了就開始監看
   const watchers = new Map();
   const attach = (atStart) => {
     for (const dir of [dirs.placeholderDir, dirs.exportDir]) {
       if (watchers.has(dir) || !existsSync(dir)) continue;
-      watchers.set(dir, watch(dir, { recursive: true }, kick));
+      const w = watch(dir, { recursive: true }, kick);
+      w.on('error', () => {
+        w.close();
+        watchers.delete(dir);
+        kick();
+      });
+      watchers.set(dir, w);
       if (!atStart) kick(); // 後來才出現的資料夾，裡面可能已經有圖
     }
   };

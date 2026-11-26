@@ -15,7 +15,7 @@
  *     edge（碰到畫布邊緣）、ground（最下緣和地平線的距離，1x，正＝低於地平線；沒有腳底 pivot 的圖是 null）
  *   errors：[{ image, message }]
  */
-import { mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
@@ -59,7 +59,7 @@ const sizeOf = (file) =>
 export async function buildArt({ placeholderDir, exportDir, buildDir, log = console }) {
   const dirs = { placeholderDir, exportDir };
   const manifest = { groups: {}, images: {}, errors: [] };
-  rmSync(path.join(buildDir, '1x'), { recursive: true, force: true });
+  // 1x 不先清空、直接覆寫：重跑時對齊工具可能還在讀；不再用到的舊檔留著無害（只認 manifest 列的圖）
 
   for (const group of listGroups(dirs)) {
     const { from, meta } = pickMeta(group, dirs);
