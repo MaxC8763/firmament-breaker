@@ -1,0 +1,22 @@
+# 依賴、建置與測試產物
+node_modules/
+dist/
+.vite/
+art/build/
+art/**/_preview/
+test-results/
+playwright-report/
+*.log
+
+# Claude Code 的設定與規劃只放私有 workspace，不進這個公開 repo
+.claude/
+CLAUDE.md
+SPEC.md
+tasks/
+
+# 作業系統與編輯器雜物
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~

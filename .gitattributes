@@ -1,0 +1,19 @@
+# 文字檔一律 LF：Windows 的 core.autocrlf=true 會在 checkout 時把文字檔轉成 CRLF，
+# 跟 Linux 的 CI 互比時整檔都會被標成變動。要在第一次 commit 前就釘死。
+* text=auto eol=lf
+
+# 二進位檔明確標示，避免被當成文字做換行轉換而損毀
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.webp  binary
+*.gif   binary
+*.ogg   binary
+*.mp3   binary
+*.wav   binary
+*.m4a   binary
+*.ttf   binary
+*.otf   binary
+*.woff  binary
+*.woff2 binary
+*.zip   binary
