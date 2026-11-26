@@ -13,7 +13,8 @@
     "preview": "vite preview",
     "e2e": "playwright test",
     "smoke": "node tools/smoke.mjs",
-    "art:placeholder": "node tools/placeholder/gen-hero.mjs"
+    "art:placeholder": "node tools/placeholder/gen-hero.mjs",
+    "art": "node tools/art/pipeline.mjs"
   },
   "dependencies": {
     "phaser": "4.2.1"
