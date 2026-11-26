@@ -12,7 +12,7 @@ export function watchArt(dirs, { delay = 300 } = {}) {
     if (running) return void (again = true);
     running = true;
     try {
-      console.log(summary(await buildArt(dirs)));
+      console.log(summary(await buildArt(dirs), dirs.buildDir));
     } catch (e) {
       console.error(`美術管線失敗：${e.message}`);
     }

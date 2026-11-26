@@ -1,4 +1,6 @@
+import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
+import { ALIGN_PORT, ALIGN_TMP, ALIGN_URL } from './e2e/env';
 
 export default defineConfig({
   testDir: 'e2e',
@@ -15,9 +17,16 @@ export default defineConfig({
       },
     },
   ],
-  webServer: {
-    command: 'npm run dev -- --port 5173 --strictPort',
-    url: 'http://localhost:5173',
-    reuseExistingServer: !process.env.CI,
-  },
+  webServer: [
+    {
+      command: 'npm run dev -- --port 5173 --strictPort',
+      url: 'http://localhost:5173',
+      reuseExistingServer: !process.env.CI,
+    },
+    {
+      command: `node tools/align/server.mjs --port ${ALIGN_PORT} --export "${path.join(ALIGN_TMP, 'export')}" --build "${path.join(ALIGN_TMP, 'build')}"`,
+      url: ALIGN_URL,
+      reuseExistingServer: false,
+    },
+  ],
 });

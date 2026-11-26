@@ -112,18 +112,19 @@ export async function buildArt({ placeholderDir, exportDir, buildDir, log = cons
   return manifest;
 }
 
-/** 命令列參數：--export <資料夾>（預設 art/export） */
+/** 命令列參數：--export <資料夾>（預設 art/export）、--build <資料夾>（預設 art/build） */
 export function cliDirs(argv = process.argv.slice(2)) {
-  const at = argv.indexOf('--export');
-  return { placeholderDir: 'art/placeholder', exportDir: at >= 0 ? argv[at + 1] : 'art/export', buildDir: 'art/build' };
+  const opt = (name, fallback) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : fallback);
+  return { placeholderDir: 'art/placeholder', exportDir: opt('--export', 'art/export'), buildDir: opt('--build', 'art/build') };
 }
 
-export function summary(m) {
+export function summary(m, buildDir = 'art/build') {
   const all = Object.values(m.images);
   const own = all.filter((i) => i.source === 'export').length;
-  return `美術管線：${all.length} 張圖 → art/build（手繪 ${own}、錯誤 ${m.errors.length}）`;
+  return `美術管線：${all.length} 張圖 → ${buildDir}（手繪 ${own}、錯誤 ${m.errors.length}）`;
 }
 
 if (path.resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
-  console.log(summary(await buildArt(cliDirs())));
+  const dirs = cliDirs();
+  console.log(summary(await buildArt(dirs), dirs.buildDir));
 }

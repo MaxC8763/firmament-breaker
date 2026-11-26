@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <title>美術對齊工具 · Firmament Breaker</title>
+    <style>
+      body { margin: 0; display: grid; grid-template-columns: 270px 1fr; height: 100vh; font: 13px system-ui, sans-serif; color: #222; background: #f6f7f9; }
+      #list { overflow: auto; border-right: 1px solid #ccd3dc; padding: 6px; background: #fff; }
+      #list summary { cursor: pointer; padding: 3px 4px; border-radius: 4px; display: flex; gap: 6px; }
+      #list summary .name { flex: 1; }
+      #list summary.on { background: #dfe9ff; }
+      #list .frames { display: flex; flex-wrap: wrap; gap: 3px; padding: 3px 0 6px 16px; }
+      #list .frames button { font: 11px monospace; padding: 1px 4px; border: 1px solid #889; background: #fff; border-radius: 3px; cursor: pointer; }
+      #list .frames button.ph { color: #9aa; border-color: #ccd; }
+      #list .frames button.on { outline: 2px solid #3366ff; }
+      main { overflow: auto; padding: 8px 12px; }
+      #bar { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin-bottom: 8px; }
+      #bar input[type='range'] { width: 70px; vertical-align: middle; }
+      #info { margin-top: 6px; font: 12px monospace; white-space: pre-wrap; }
+      canvas { display: block; box-shadow: 0 0 0 1px #ccd3dc; }
+    </style>
+  </head>
+  <body>
+    <aside id="list"></aside>
+    <main>
+      <div id="bar">
+        <span>放大 <button data-zoom="1">1×</button><button data-zoom="2">2×</button><button data-zoom="4">4×</button></span>
+        <button id="play">播放／暫停（空白鍵）</button>
+        <span>←→ 逐格、F 翻面</span>
+        <label><input type="checkbox" id="art" checked /> 圖（有手繪就是手繪）</label><input type="range" id="artAlpha" min="0" max="100" value="100" />
+        <label><input type="checkbox" id="ph" checked /> 佔位圖</label><input type="range" id="phAlpha" min="0" max="100" value="30" />
+        <label><input type="checkbox" id="fx" checked /> 特效</label>
+        <label><input type="checkbox" id="boxes" checked /> 判定框</label>
+        <label><input type="checkbox" id="onion" /> 前一格（洋蔥皮）</label>
+      </div>
+      <canvas id="stage"></canvas>
+      <div id="info"></div>
+    </main>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

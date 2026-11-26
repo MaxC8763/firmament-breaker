@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { shotPath } from './shot';
+import { shotPath } from './env';
 
 test('遊戲開機到就緒、主角 idle 站在地平線上、沒有 console error', async ({ page }) => {
   const errors: string[] = [];
