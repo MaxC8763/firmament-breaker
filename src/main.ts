@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { Boot } from './scenes/Boot';
 import { Stage } from './scenes/Stage';
 
 new Phaser.Game({
@@ -10,5 +11,5 @@ new Phaser.Game({
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   render: { antialias: true, pixelArt: false },
   physics: { default: 'arcade' },
-  scene: [Stage],
+  scene: [Boot, Stage],
 });
