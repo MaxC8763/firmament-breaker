@@ -1,0 +1,23 @@
+{
+  "canvas": [
+    256,
+    256
+  ],
+  "pivot": [
+    128,
+    128
+  ],
+  "scale": 2,
+  "fps": 12,
+  "loop": true,
+  "frames": [
+    {
+      "file": "x3_wave_00",
+      "hold": 1
+    },
+    {
+      "file": "x3_wave_01",
+      "hold": 1
+    }
+  ]
+}

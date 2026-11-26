@@ -1,0 +1,30 @@
+{
+  "canvas": [
+    768,
+    512
+  ],
+  "pivot": [
+    384,
+    492
+  ],
+  "scale": 2,
+  "fps": 12,
+  "loop": false,
+  "frames": [
+    {
+      "file": "s_throw_00",
+      "hold": 2,
+      "grounded": true
+    },
+    {
+      "file": "s_throw_01",
+      "hold": 1,
+      "grounded": true
+    },
+    {
+      "file": "s_throw_02",
+      "hold": 2,
+      "grounded": true
+    }
+  ]
+}

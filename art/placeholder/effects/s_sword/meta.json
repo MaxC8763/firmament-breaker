@@ -1,0 +1,19 @@
+{
+  "canvas": [
+    192,
+    48
+  ],
+  "pivot": [
+    96,
+    24
+  ],
+  "scale": 2,
+  "fps": 12,
+  "loop": false,
+  "frames": [
+    {
+      "file": "s_sword_00",
+      "hold": 1
+    }
+  ]
+}

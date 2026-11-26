@@ -1,0 +1,27 @@
+{
+  "canvas": [
+    320,
+    320
+  ],
+  "pivot": [
+    160,
+    160
+  ],
+  "scale": 2,
+  "fps": 12,
+  "loop": true,
+  "frames": [
+    {
+      "file": "d_storm_00",
+      "hold": 1
+    },
+    {
+      "file": "d_storm_01",
+      "hold": 1
+    },
+    {
+      "file": "d_storm_02",
+      "hold": 1
+    }
+  ]
+}

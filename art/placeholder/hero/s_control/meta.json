@@ -1,0 +1,25 @@
+{
+  "canvas": [
+    768,
+    512
+  ],
+  "pivot": [
+    384,
+    492
+  ],
+  "scale": 2,
+  "fps": 12,
+  "loop": true,
+  "frames": [
+    {
+      "file": "s_control_00",
+      "hold": 3,
+      "grounded": true
+    },
+    {
+      "file": "s_control_01",
+      "hold": 3,
+      "grounded": true
+    }
+  ]
+}

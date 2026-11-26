@@ -1,0 +1,25 @@
+{
+  "canvas": [
+    768,
+    512
+  ],
+  "pivot": [
+    384,
+    492
+  ],
+  "scale": 2,
+  "fps": 12,
+  "loop": false,
+  "frames": [
+    {
+      "file": "wake_00",
+      "hold": 1,
+      "grounded": true
+    },
+    {
+      "file": "wake_01",
+      "hold": 1,
+      "grounded": true
+    }
+  ]
+}

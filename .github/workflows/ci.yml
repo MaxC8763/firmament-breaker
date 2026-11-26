@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - name: 型別檢查與單元測試
+        run: npm run check
+      - name: 正式建置
+        run: npm run build
+      - name: 安裝 Chromium
+        run: npx playwright install --with-deps chromium
+      - name: 瀏覽器測試
+        run: npm run e2e
+      - name: 對正式建置跑 smoke（vite preview，含 Pages 子路徑）
+        run: |
+          npx vite preview --port 4173 --strictPort &
+          npm run smoke -- http://localhost:4173/firmament-breaker/ --sha "$GITHUB_SHA"

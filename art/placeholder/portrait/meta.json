@@ -1,0 +1,30 @@
+{
+  "canvas": [
+    640,
+    960
+  ],
+  "anchor": [
+    320,
+    960
+  ],
+  "scale": 2,
+  "note": "所有圖層同一張畫布，直接疊：body → eyes → mouth",
+  "expressions": {
+    "normal": {
+      "eyes": "eyes_open",
+      "mouth": "mouth_smile"
+    },
+    "happy": {
+      "eyes": "eyes_happy",
+      "mouth": "mouth_open"
+    },
+    "angry": {
+      "eyes": "eyes_angry",
+      "mouth": "mouth_frown"
+    },
+    "surprised": {
+      "eyes": "eyes_wide",
+      "mouth": "mouth_o"
+    }
+  }
+}

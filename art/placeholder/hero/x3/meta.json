@@ -1,0 +1,47 @@
+{
+  "canvas": [
+    768,
+    512
+  ],
+  "pivot": [
+    384,
+    492
+  ],
+  "scale": 2,
+  "fps": 12,
+  "loop": false,
+  "frames": [
+    {
+      "file": "x3_00",
+      "hold": 2,
+      "grounded": true,
+      "phase": "startup"
+    },
+    {
+      "file": "x3_01",
+      "hold": 1,
+      "grounded": true,
+      "phase": "active",
+      "fx": "x3_fx_01"
+    },
+    {
+      "file": "x3_02",
+      "hold": 1,
+      "grounded": true,
+      "phase": "active",
+      "fx": "x3_fx_02"
+    },
+    {
+      "file": "x3_03",
+      "hold": 2,
+      "grounded": true,
+      "phase": "recovery"
+    },
+    {
+      "file": "x3_04",
+      "hold": 2,
+      "grounded": true,
+      "phase": "recovery"
+    }
+  ]
+}
