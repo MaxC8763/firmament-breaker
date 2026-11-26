@@ -305,7 +305,7 @@ const ACTIONS = {
   ], { select: 'by-velocity' }),
   double_jump: A(
     [0, 120, 240].map((s) =>
-      F(1, { spin: s, oy: -50, legF: 60, legB: 40, armF: 95, armB: 120, sword: 100, squash: 0.95, grounded: false })),
+      F(1, { spin: s, oy: -90, legF: 60, legB: 40, armF: 95, armB: 120, sword: 100, squash: 0.95, grounded: false })),
   ),
   x1: A([
     F(1, { armBack: true, ...ATK, armF: 135, armB: -30, sword: 165, lean: -4 }, { phase: S }),
