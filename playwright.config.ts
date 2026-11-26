@@ -24,7 +24,10 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
     },
     {
-      command: `node tools/align/server.mjs --port ${ALIGN_PORT} --export "${path.join(ALIGN_TMP, 'export')}" --build "${path.join(ALIGN_TMP, 'build')}"`,
+      // 先清空暫存資料夾：上一次測試留下的 manifest 會讓網頁在第一次重建完成前讀到舊結果
+      command:
+        `node -e "require('node:fs').rmSync(process.argv[1], { recursive: true, force: true })" "${ALIGN_TMP}" && ` +
+        `node tools/align/server.mjs --port ${ALIGN_PORT} --export "${path.join(ALIGN_TMP, 'export')}" --build "${path.join(ALIGN_TMP, 'build')}"`,
       url: ALIGN_URL,
       reuseExistingServer: false,
     },
