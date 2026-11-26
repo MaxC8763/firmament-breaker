@@ -3,41 +3,53 @@
  * 美術管線：npm run art [-- --export <資料夾>]
  *
  * art/export（手繪）與 art/placeholder（佔位圖）以單張為單位合併 → 用 lanczos3 縮成 1x 寫進 art/build/1x/
- * → 算每張圖的不透明範圍與貼地距離 → 寫 art/build/manifest.json。
+ * → 算每張圖的不透明範圍與貼地距離 → 寫 art/build/manifest.json → 打包 atlas。
  * export 的圖尺寸不是「meta 的畫布 × scale」時，印出錯誤並改用佔位圖，遊戲不會因此壞掉。
+ * 遊戲用的檔案（atlas.png、atlas.json、manifest.json）寫在 art/build/game/，也就是 Vite 的 publicDir；
+ * 1x 單張只給對齊工具用，不會進正式建置。
  *
  * manifest.json：
  *   groups[資料夾]：那個資料夾的 meta.json（metaFrom＝它來自哪一層）
- *   images[key]：key＝去掉 .png 的相對路徑（動作的格是 <資料夾>/<file>，特效是 <資料夾>/fx/<fx>）；
- *     source、mtime、canvas（1x）、bounds（alpha ≥ 128 的範圍 [左, 上, 右, 下)）、edge（碰到畫布邊緣）、
- *     ground（最下緣和地平線的距離，1x，正＝低於地平線；沒有腳底 pivot 的圖是 null）
+ *   images[key]：key＝去掉 .png 的相對路徑（動作的格是 <資料夾>/<file>，特效是 <資料夾>/fx/<fx>），也是 atlas 的格名；
+ *     source、mtime、canvas（1x）、bounds（alpha ≥ 128 的範圍 [左, 上, 右, 下)）、trim（alpha > 0 的範圍）、
+ *     edge（碰到畫布邊緣）、ground（最下緣和地平線的距離，1x，正＝低於地平線；沒有腳底 pivot 的圖是 null）
  *   errors：[{ image, message }]
  */
 import { mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
+import { packAtlas } from './atlas.mjs';
 import { candidates, imagesOf, listGroups, pickMeta } from './sources.mjs';
 
 const ALPHA = 128; // 不透明的門檻，和佔位圖產生器一致
 
-/** 1x 的 RGBA：不透明範圍、是否碰到畫布邊緣、最下緣和地平線（groundY）的距離 */
-export function measure(data, width, height, groundY) {
+/** alpha 達到門檻的像素範圍 [左, 上, 右, 下)（不含右、下）；沒有就是 null */
+function extent(data, width, height, min) {
   let left = width, top = height, right = -1, bottom = -1;
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      if (data[(y * width + x) * 4 + 3] < ALPHA) continue;
+      if (data[(y * width + x) * 4 + 3] < min) continue;
       if (x < left) left = x;
       if (x > right) right = x;
       if (y < top) top = y;
       bottom = y;
     }
   }
-  if (bottom < 0) return { bounds: null, edge: false, ground: null };
+  return bottom < 0 ? null : [left, top, right + 1, bottom + 1];
+}
+
+/** 1x 的 RGBA：不透明範圍、裁切範圍、是否碰到畫布邊緣、最下緣和地平線（groundY）的距離 */
+export function measure(data, width, height, groundY) {
+  const bounds = extent(data, width, height, ALPHA);
+  const trim = extent(data, width, height, 1);
+  if (!bounds) return { bounds, trim, edge: false, ground: null };
+  const [left, top, right, bottom] = bounds;
   return {
-    bounds: [left, top, right + 1, bottom + 1],
-    edge: left === 0 || top === 0 || right === width - 1 || bottom === height - 1,
-    ground: groundY === undefined ? null : bottom + 1 - groundY,
+    bounds,
+    trim,
+    edge: left === 0 || top === 0 || right === width || bottom === height,
+    ground: groundY === undefined ? null : bottom - groundY,
   };
 }
 
@@ -92,8 +104,11 @@ export async function buildArt({ placeholderDir, exportDir, buildDir, log = cons
     }
   }
 
-  mkdirSync(buildDir, { recursive: true });
-  writeFileSync(path.join(buildDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+  const gameDir = path.join(buildDir, 'game');
+  await packAtlas(manifest, path.join(buildDir, '1x'), gameDir);
+  const text = JSON.stringify(manifest, null, 2) + '\n';
+  writeFileSync(path.join(gameDir, 'manifest.json'), text);
+  writeFileSync(path.join(buildDir, 'manifest.json'), text);
   return manifest;
 }
 

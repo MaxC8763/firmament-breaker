@@ -7,14 +7,15 @@
     "node": ">=22.12"
   },
   "scripts": {
-    "dev": "vite",
+    "dev": "npm run art && vite",
     "check": "tsc --noEmit && vitest run --passWithNoTests",
-    "build": "vite build",
+    "build": "npm run art && vite build",
     "preview": "vite preview",
     "e2e": "playwright test",
     "smoke": "node tools/smoke.mjs",
     "art:placeholder": "node tools/placeholder/gen-hero.mjs",
-    "art": "node tools/art/pipeline.mjs"
+    "art": "node tools/art/pipeline.mjs",
+    "art:watch": "node tools/art/watch.mjs"
   },
   "dependencies": {
     "phaser": "4.2.1"

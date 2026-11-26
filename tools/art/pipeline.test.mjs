@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { pack } from './atlas.mjs';
 import { buildArt, measure } from './pipeline.mjs';
 
 // 測試用的小畫布：1x 16×32、腳底 y＝20；檔案一律 2x（32×64）
@@ -124,9 +125,9 @@ describe('貼地距離與不透明範圍', () => {
     return data;
   }
 
-  test('最下緣（alpha ≥ 128）和地平線的距離，以及不透明範圍', () => {
+  test('最下緣（alpha ≥ 128）和地平線的距離、不透明範圍；裁切範圍連半透明也算', () => {
     const data = raw(10, 10, [[3, 2, 255], [6, 5, 200], [4, 7, 127]]);
-    expect(measure(data, 10, 10, 6)).toEqual({ bounds: [3, 2, 7, 6], edge: false, ground: 0 });
+    expect(measure(data, 10, 10, 6)).toEqual({ bounds: [3, 2, 7, 6], trim: [3, 2, 7, 8], edge: false, ground: 0 });
     expect(measure(data, 10, 10, 4).ground).toBe(2);
     expect(measure(data, 10, 10, 8).ground).toBe(-2);
   });
@@ -134,9 +135,57 @@ describe('貼地距離與不透明範圍', () => {
   test('碰到畫布邊緣就標出來', () => {
     expect(measure(raw(10, 10, [[0, 5, 255]]), 10, 10, 6).edge).toBe(true);
     expect(measure(raw(10, 10, [[5, 9, 255]]), 10, 10, 6).edge).toBe(true);
+    expect(measure(raw(10, 10, [[9, 0, 255]]), 10, 10, 6).edge).toBe(true);
   });
 
   test('全透明的圖沒有範圍', () => {
-    expect(measure(raw(4, 4, []), 4, 4, 2)).toEqual({ bounds: null, edge: false, ground: null });
+    expect(measure(raw(4, 4, []), 4, 4, 2)).toEqual({ bounds: null, trim: null, edge: false, ground: null });
+  });
+});
+
+describe('atlas', () => {
+  const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+  test('一列一列排：格子不重疊、不超出寬度', () => {
+    let seed = 7;
+    const rnd = (n) => 1 + ((seed = (seed * 48271) % 2147483647) % n);
+    const sizes = Array.from({ length: 60 }, () => ({ w: rnd(300), h: rnd(300) }));
+    const { pos, height } = pack(sizes, 1024);
+    const rects = sizes.map((s, i) => ({ ...pos[i], ...s }));
+    for (const r of rects) expect(r.x + r.w <= 1024 && r.y + r.h <= height).toBe(true);
+    for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) expect(overlaps(rects[i], rects[j])).toBe(false);
+  });
+
+  test('格數和 manifest 相同、格子不重疊、原始尺寸等於畫布尺寸、像素和 1x 單張相同', async () => {
+    json('placeholder/hero/act/meta.json', {
+      ...META,
+      frames: [...META.frames, { file: 'a_02', hold: 1, grounded: false, fx: 'a_fx_02' }],
+    });
+    await png('placeholder/hero/act/a_00.png');
+    await png('placeholder/hero/act/a_01.png', { left: 0, right: 30 });
+    await png('placeholder/hero/act/a_02.png', { top: 0, bottom: 20 });
+    await png('placeholder/hero/act/fx/a_fx_02.png', { left: 2, right: 6, top: 2, bottom: 6 });
+    json('placeholder/icon/meta.json', { canvas: [8, 8], scale: 2 });
+    await png('placeholder/icon/map_icon.png', { w: 16, h: 16, left: 0, right: 16, top: 0, bottom: 16 });
+    const m = await build();
+
+    const game = (f) => path.join(dirs.buildDir, 'game', f);
+    const atlas = JSON.parse(readFileSync(game('atlas.json'), 'utf8'));
+    expect(Object.keys(atlas.frames).sort()).toEqual(Object.keys(m.images).sort());
+    expect(JSON.parse(readFileSync(game('manifest.json'), 'utf8'))).toEqual(m);
+
+    const frames = Object.entries(atlas.frames);
+    for (const [key, f] of frames) {
+      expect([f.sourceSize.w, f.sourceSize.h]).toEqual(m.images[key].canvas);
+      expect(f.frame.x + f.frame.w <= atlas.meta.size.w && f.frame.y + f.frame.h <= atlas.meta.size.h).toBe(true);
+    }
+    for (let i = 0; i < frames.length; i++)
+      for (let j = i + 1; j < frames.length; j++) expect(overlaps(frames[i][1].frame, frames[j][1].frame)).toBe(false);
+
+    const { frame, spriteSourceSize: s } = atlas.frames['hero/act/a_01'];
+    const region = (file, r) => sharp(file).extract({ left: r.x, top: r.y, width: r.w, height: r.h }).raw().toBuffer();
+    const fromAtlas = await region(game('atlas.png'), frame);
+    const from1x = await region(path.join(dirs.buildDir, '1x/hero/act/a_01.png'), s);
+    expect(fromAtlas.equals(from1x)).toBe(true);
   });
 });
