@@ -27,13 +27,10 @@ const rec = (page: Page) => page.evaluate(() => (window as any).__rec);
 const untilRec = (page: Page, fn: string) =>
   page.waitForFunction(`(() => { const r = window.__rec; return ${fn}; })()`, null, { timeout: 30_000 });
 
-/** 按 key 直到條件成立：機器忙、幀率很低時，一次按鍵可能剛好錯過接招的時機 */
-async function pressUntil(page: Page, key: string, fn: string) {
-  for (let i = 0; i < 10; i++) {
-    await page.keyboard.press(key);
-    if (await until(page, fn, 2_000).then(() => true, () => false)) return;
-  }
-  throw new Error(`按了 10 次 ${key}，${fn} 還是不成立`);
+/** 按一下 key，等條件成立；作弊鍵這類切換鍵只能按一下，多按會切回去 */
+async function pressOnce(page: Page, key: string, fn: string) {
+  await page.keyboard.press(key);
+  await until(page, fn);
 }
 
 /** 連按兩下並按住，直到跑起來：兩下之間等邏輯跑過一個 tick，免得同一幀裡的兩下被當成一下；太慢沒接上就放開重來 */
@@ -50,9 +47,30 @@ async function doubleTap(page: Page, key: string) {
   throw new Error(`連按兩下 ${key} 五次都沒有跑起來`);
 }
 
-/** 按 X 接完 XXX：每一步等到「至少到了這一招」，多按的一下提早接到下一招也算 */
+/**
+ * 出 XXX：接招的時機只有一招的長度（約 25 tick），機器很忙時 Playwright 一來一回就可能錯過，
+ * 所以改在網頁裡每幀看招式，待機、X1、X2 各按一次 X（和真的鍵盤一樣送到 window），到 X3 為止
+ */
 async function xxx(page: Page) {
-  for (const later of [`['x1', 'x2', 'x3']`, `['x2', 'x3']`, `['x3']`]) await pressUntil(page, 'x', `${later}.includes(s.hero.move)`);
+  await page.evaluate(() => {
+    const w = window as any;
+    const press = () => {
+      for (const type of ['keydown', 'keyup']) window.dispatchEvent(new KeyboardEvent(type, { key: 'x', code: 'KeyX', keyCode: 88 } as KeyboardEventInit));
+    };
+    const pressed = new Set<string>();
+    w.__xxx = false;
+    const loop = () => {
+      const move = w.__game.getState().hero.move ?? 'none';
+      if (move === 'x3') return (w.__xxx = true);
+      if (!pressed.has(move)) {
+        pressed.add(move);
+        press();
+      }
+      requestAnimationFrame(loop);
+    };
+    loop();
+  });
+  await page.waitForFunction(() => (window as any).__xxx, null, { timeout: 30_000 });
 }
 
 test.beforeEach(async ({ page }) => {
@@ -122,13 +140,16 @@ test('開機有 3 隻小兵在待機；主角靠近到 600 px 內，小兵朝主
 });
 
 test('XXX 打倒 1 隻小兵，MP 增加 16–20（斬擊 3 段各 5，加上劍氣 1–5 段各 1）', async ({ page }) => {
-  // 先開無敵（作弊鍵 3），免得連段被小兵撞斷
-  await pressUntil(page, '3', 's.hero.invincible');
+  // 先開無敵（作弊鍵 3），免得連段被小兵撞斷；關掉判定框這些開發用的顯示，截乾淨的戰鬥畫面
+  await pressOnce(page, '3', 's.hero.invincible');
+  await pressOnce(page, 'Backquote', '!s.devShown');
   // 走到最近的小兵附近，等它追過來進到斬擊範圍
   await page.keyboard.down('ArrowRight');
   await until(page, 's.enemies.some((e) => e.x - s.hero.x < 400)');
   await page.keyboard.up('ArrowRight');
-  await until(page, 's.enemies.some((e) => e.x - s.hero.x < 180)');
+  // 小兵近一點才出招：每段斬擊都會重新硬直、擊退，X1 打中到 X3 判定約 40 tick，小兵會被推遠約 90 px，
+  // X1 打中時超過 187 px，X3 的斬擊就搆不到（框伸到 210、小兵半寬 66）
+  await until(page, 's.enemies.some((e) => e.x - s.hero.x < 150)');
   const before = await state(page);
   await xxx(page);
   // 劍氣在飛的時候截一張戰鬥畫面（主角、小兵、劍氣、HUD）；機器太忙錯過了也不影響判定
@@ -156,4 +177,29 @@ test('被小兵撞到：HP −50、往後退、硬直結束後恢復行動', asy
   expect(hurt.x - after.x).toBeGreaterThan(80);
   expect(after.state).not.toBe('Dead');
   await page.screenshot({ path: shotPath('play-hurt') });
+});
+
+test('開發模式：作弊鍵 1 MP 全滿、2 HP 全滿、3 無敵、` 切換判定框與傷害數字', async ({ page }) => {
+  expect((await state(page)).devShown).toBe(true);
+  await pressOnce(page, '1', 's.hero.mp === 300');
+  await pressOnce(page, '3', 's.hero.invincible');
+  // 走到小兵旁邊出 XXX：判定框、傷害數字與段數都畫出來
+  await page.keyboard.down('ArrowRight');
+  await until(page, 's.enemies.some((e) => e.x - s.hero.x < 400)');
+  await page.keyboard.up('ArrowRight');
+  // 小兵近一點才出招：每段斬擊都會重新硬直、擊退，X1 打中到 X3 判定約 40 tick，小兵會被推遠約 90 px，
+  // X1 打中時超過 187 px，X3 的斬擊就搆不到（框伸到 210、小兵半寬 66）
+  await until(page, 's.enemies.some((e) => e.x - s.hero.x < 150)');
+  await xxx(page);
+  if (await until(page, 's.waves.length > 0 && s.waves[0].x - s.waves[0].fromX > 60', 5_000).then(() => true, () => false)) {
+    await page.screenshot({ path: shotPath('play-dev') });
+  }
+  // 關掉無敵，往右走到被下一隻小兵撞到，再用 2 補滿
+  await pressOnce(page, '3', '!s.hero.invincible');
+  await page.keyboard.down('ArrowRight');
+  await until(page, 's.hero.hp < 1000');
+  await page.keyboard.up('ArrowRight');
+  await pressOnce(page, '2', 's.hero.hp === 1000');
+  await pressOnce(page, 'Backquote', '!s.devShown');
+  await pressOnce(page, 'Backquote', 's.devShown');
 });

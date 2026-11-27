@@ -28,7 +28,7 @@ const MAX_DELTA_MS = 100;
 const WALL = 24;
 
 /** 飛行中的劍氣 */
-interface Wave {
+export interface Wave {
   sprite: Phaser.GameObjects.Sprite;
   /** 生成時的 x */
   fromX: number;
@@ -158,7 +158,7 @@ export class Stage extends Phaser.Scene {
   /** 小兵碰到主角的 hurtbox 就造成傷害；硬直中、待死亡的小兵不算 */
   private contactDamage() {
     const hero = this.hero;
-    const box = toWorld(hitboxes.hurtbox, hero.x, hero.y, hero.logic.facing);
+    const box = this.heroHurtbox();
     for (const g of this.grunts) {
       if (!gruntHarmful(g.logic) || !overlaps(box, g.hurtbox())) continue;
       if (hurtHero(hero.logic, GRUNT.contactDamage, Math.sign(hero.x - g.x) || -hero.logic.facing)) break;
@@ -197,13 +197,25 @@ export class Stage extends Phaser.Scene {
     }
     if (move && !this.slash) this.slash = { move, attack: newAttack(SLASH_SPEC) };
 
+    const box = this.heroAttackBox();
+    if (this.slash && box) this.hitAll(this.slash.attack, box, hero.logic.facing, true);
+    for (const w of this.waves) this.hitAll(w.attack, this.waveBox(w), w.dir, false);
+  }
+
+  /** 主角在判定格的攻擊框（世界座標）；不在判定期間是 null */
+  heroAttackBox(): Box | null {
+    const hero = this.hero;
     const active = activeFrame(hero.logic);
     const shape = active && attackShape(HITBOXES, active.move, active.air, active.file);
-    if (this.slash && shape?.type === 'rect') {
-      this.hitAll(this.slash.attack, toWorld(shape, hero.x, hero.y, hero.logic.facing), hero.logic.facing, true);
-    }
-    const waveBox = hitboxes.projectiles.x3_wave;
-    for (const w of this.waves) this.hitAll(w.attack, toWorld(waveBox, w.sprite.x, w.sprite.y, w.dir), w.dir, false);
+    return shape?.type === 'rect' ? toWorld(shape, hero.x, hero.y, hero.logic.facing) : null;
+  }
+
+  heroHurtbox(): Box {
+    return toWorld(hitboxes.hurtbox, this.hero.x, this.hero.y, this.hero.logic.facing);
+  }
+
+  waveBox(w: Wave): Box {
+    return toWorld(hitboxes.projectiles.x3_wave, w.sprite.x, w.sprite.y, w.dir);
   }
 
   /** 攻擊框碰到的每隻小兵各接觸一次；dir 是擊退方向，single＝單段斬擊（造成傷害時命中停頓） */
