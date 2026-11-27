@@ -4,10 +4,10 @@ import { attackShape, overlaps, toWorld, type Box, type HitboxData } from '../co
 import hitboxes from '../data/hitboxes.json';
 import type { Manifest } from '../data/manifest';
 import { DOOR, doorOpen, LEVEL_START, MAPS, nextEntry, PLATFORM_THICKNESS, type Entry, type MapData } from '../data/maps';
-import { GROUND_Y, GRUNT, HERO, SLASH, TICK_HZ, WAVE, WORLD_WIDTH, ticks } from '../data/tuning';
+import { ENEMY, GROUND_Y, HERO, SLASH, TICK_HZ, WAVE, WORLD_WIDTH, ticks } from '../data/tuning';
 import { installDevTools } from '../dev/devTools';
-import { Grunt } from '../entities/Grunt';
-import { gruntHarmful, GruntState, hurtGrunt } from '../entities/gruntLogic';
+import { Enemy } from '../entities/Enemy';
+import { enemyHarmful, EnemyState, hurtEnemy } from '../entities/enemyLogic';
 import { Hero } from '../entities/Hero';
 import { activeFrame, eatItem, HeroState, hurtHero, type Attack } from '../entities/heroLogic';
 import { noButtons, type Button, type InputFrame } from '../input/input';
@@ -22,7 +22,7 @@ const ITEM_BOX = { x: -32, y: -88, w: 64, h: 88 };
 /** HUD 的位置與大小（畫面座標） */
 const HUD = { x: 48, hpY: 40, hpWidth: 480, mpY: 84, mpWidth: 360 };
 
-/** 命中時發給開發模式的事件：(小兵, 結果, 這一段的傷害, 攻擊實例) */
+/** 命中時發給開發模式的事件：(雜兵, 結果, 這一段的傷害, 攻擊實例) */
 export const HIT_EVENT = 'hit';
 
 const TICK_MS = 1000 / TICK_HZ;
@@ -70,7 +70,7 @@ export class Stage extends Phaser.Scene {
   /** 走進第 3 張的門：關卡停住，等按 Z 再玩一次 */
   complete: boolean;
   hero: Hero;
-  grunts: Grunt[];
+  enemies: Enemy[];
   /** 地圖上還沒被吃掉的道具 */
   items: { kind: 'hp' | 'mp'; sprite: Phaser.GameObjects.Sprite }[];
   waves: Wave[];
@@ -137,7 +137,7 @@ export class Stage extends Phaser.Scene {
       const [px, py] = g.pivot ?? [cw / 2, ch];
       return { kind, sprite: this.add.sprite(x, y, 'art', `items/${kind}/${g.frames?.[0]?.file}`).setOrigin(px / cw, py / ch) };
     });
-    this.grunts = map.enemies.map((e) => new Grunt(this, manifest, e.x));
+    this.enemies = map.enemies.map((e) => new Enemy(this, manifest, e.kind, e.x));
     this.hero = new Hero(this, manifest);
     this.hero.logic.hp = this.entry.hp;
     this.hero.logic.mp = this.entry.mp;
@@ -210,7 +210,7 @@ export class Stage extends Phaser.Scene {
       this.tick(frame);
     }
     this.hero.show();
-    for (const g of this.grunts) g.show();
+    for (const e of this.enemies) e.show();
     this.drawHud();
     const open = this.isDoorOpen();
     if (open !== this.doorShown) this.drawDoor(open);
@@ -220,7 +220,7 @@ export class Stage extends Phaser.Scene {
   private tick(frame: InputFrame) {
     const out = this.hero.step(frame);
     if (out.dropThrough) this.dropY = this.hero.body.bottom;
-    for (const g of this.grunts) g.step(this.hero.x);
+    for (const e of this.enemies) e.step(this.hero.x);
     this.physics.world.singleStep();
     // 腳底掉過平台的下緣，那個平台的上緣已經離得夠遠，物理不會再把主角推回上面
     if (this.dropY !== null && this.hero.body.bottom > this.dropY + PLATFORM_THICKNESS) this.dropY = null;
@@ -229,8 +229,8 @@ export class Stage extends Phaser.Scene {
     this.resolveHits();
     this.contactDamage();
     this.pickItems();
-    for (const g of this.grunts) if (g.logic.state === GruntState.Gone) g.destroy();
-    this.grunts = this.grunts.filter((g) => g.logic.state !== GruntState.Gone);
+    for (const e of this.enemies) if (e.logic.state === EnemyState.Gone) e.destroy();
+    this.enemies = this.enemies.filter((e) => e.logic.state !== EnemyState.Gone);
     // 站在開著的門前按 ↑：進下一張的入口；最後一張的門是關卡完成。打盹中按 ↑ 只會驚醒
     const hero = this.hero;
     const awake = ![HeroState.Dead, HeroState.Doze, HeroState.Wake].includes(hero.logic.state);
@@ -251,7 +251,7 @@ export class Stage extends Phaser.Scene {
 
   /** 這張地圖的敵人全部 HP 歸零就開門 */
   isDoorOpen() {
-    return doorOpen(this.grunts.map((g) => g.logic.hp));
+    return doorOpen(this.enemies.map((e) => e.logic.hp));
   }
 
   /** 門：關著是木門，開著是黑色的門洞，上面顯示「↑」 */
@@ -290,13 +290,13 @@ export class Stage extends Phaser.Scene {
     });
   }
 
-  /** 小兵碰到主角的 hurtbox 就造成傷害；硬直中、待死亡的小兵不算 */
+  /** 雜兵碰到主角的 hurtbox 就造成傷害；硬直中、待死亡的不算 */
   private contactDamage() {
     const hero = this.hero;
     const box = this.heroHurtbox();
-    for (const g of this.grunts) {
-      if (!gruntHarmful(g.logic) || !overlaps(box, g.hurtbox())) continue;
-      if (hurtHero(hero.logic, GRUNT.contactDamage, Math.sign(hero.x - g.x) || -hero.logic.facing)) break;
+    for (const e of this.enemies) {
+      if (!enemyHarmful(e.logic) || !overlaps(box, e.hurtbox())) continue;
+      if (hurtHero(hero.logic, ENEMY.contactDamage, Math.sign(hero.x - e.x) || -hero.logic.facing)) break;
     }
   }
 
@@ -322,7 +322,7 @@ export class Stage extends Phaser.Scene {
     this.mpText.setText(`${mp} / ${HERO.mpMax}`);
   }
 
-  /** 斬擊在判定格打小兵；劍氣整段飛行都會打 */
+  /** 斬擊在判定格打雜兵；劍氣整段飛行都會打 */
   private resolveHits() {
     const hero = this.hero;
     const move = hero.logic.attack;
@@ -353,18 +353,18 @@ export class Stage extends Phaser.Scene {
     return toWorld(hitboxes.projectiles.x3_wave, w.sprite.x, w.sprite.y, w.dir);
   }
 
-  /** 攻擊框碰到的每隻小兵各接觸一次；dir 是擊退方向，single＝單段斬擊（造成傷害時命中停頓） */
+  /** 攻擊框碰到的每隻雜兵各接觸一次；dir 是擊退方向，single＝單段斬擊（造成傷害時命中停頓） */
   private hitAll(attack: AttackInstance, box: Box, dir: number, single: boolean) {
-    for (const g of this.grunts) {
-      if (g.logic.state === GruntState.Death || g.logic.state === GruntState.Gone) continue;
-      if (!overlaps(box, g.hurtbox())) continue;
-      const { result, mp } = strike(attack, g.logic, this.hero.logic.tick);
+    for (const e of this.enemies) {
+      if (e.logic.state === EnemyState.Death || e.logic.state === EnemyState.Gone) continue;
+      if (!overlaps(box, e.hurtbox())) continue;
+      const { result, mp } = strike(attack, e.logic, this.hero.logic.tick);
       if (result === 'none') continue;
       this.hero.logic.mp = addMp(this.hero.logic.mp, mp);
-      hurtGrunt(g.logic, dir);
-      g.flash();
+      hurtEnemy(e.logic, dir);
+      e.flash();
       if (single && result === 'damage') this.hitstop = ticks(SLASH.hitstopMs);
-      this.events.emit(HIT_EVENT, g, result satisfies HitResult, result === 'damage' ? attack.spec.damage : 0, attack);
+      this.events.emit(HIT_EVENT, e, result satisfies HitResult, result === 'damage' ? attack.spec.damage : 0, attack);
     }
   }
 

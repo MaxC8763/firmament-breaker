@@ -89,12 +89,8 @@ export const SLASH = {
 /** 地圖上的道具：碰到就吃掉，超過上限的部分捨去 */
 export const ITEM = { hp: 300, mp: 100 };
 
-/** 雜兵 A 小兵 */
-export const GRUNT = {
-  hp: 120,
-  speed: 120,
-  /** 主角在水平這個距離內就追 */
-  chaseRange: 600,
+/** 雜兵共用：受擊反應與碰撞傷害 */
+export const ENEMY = {
   hurtMs: 300,
   knockback: 40,
   /** 受擊閃白多久 */
@@ -102,3 +98,11 @@ export const GRUNT = {
   /** 碰到主角造成的傷害 */
   contactDamage: 50,
 };
+
+/** 各種雜兵的數值；chaseRange＝主角在水平這個距離內就追 */
+export const ENEMIES = {
+  /** A 小兵 */
+  grunt: { hp: 120, speed: 120, chaseRange: 600 },
+};
+
+export type EnemyKind = keyof typeof ENEMIES;

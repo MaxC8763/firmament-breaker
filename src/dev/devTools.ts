@@ -3,8 +3,8 @@ import type { AttackInstance, HitResult } from '../combat/attack';
 import type { Box } from '../combat/hitbox';
 import type { Manifest } from '../data/manifest';
 import { GROUND_Y, HERO } from '../data/tuning';
-import type { Grunt } from '../entities/Grunt';
-import { GruntState, hurtGrunt } from '../entities/gruntLogic';
+import type { Enemy } from '../entities/Enemy';
+import { EnemyState, hurtEnemy } from '../entities/enemyLogic';
 import { heroView, HeroState } from '../entities/heroLogic';
 import { HIT_EVENT, onKey, type Stage } from '../scenes/Stage';
 
@@ -34,7 +34,7 @@ export interface GameState {
     /** 作弊鍵 3 的無敵 */
     invincible: boolean;
   };
-  enemies: { x: number; y: number; state: string; facing: number; hp: number }[];
+  enemies: { kind: string; x: number; y: number; state: string; facing: number; hp: number }[];
   /** 地圖上還沒被吃掉的道具 */
   items: { kind: string; x: number; y: number }[];
   /** 這張地圖打中敵人回了多少 MP（不含自然回復與道具；超過上限捨去的也算） */
@@ -95,7 +95,7 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
       if (fill) boxes.fillStyle(color, 0.25).fillRect(b.left, b.top, b.right - b.left, b.bottom - b.top);
     };
     rect(scene.heroHurtbox(), COLOR.hurtbox);
-    for (const g of scene.grunts) rect(g.hurtbox(), COLOR.hurtbox);
+    for (const e of scene.enemies) rect(e.hurtbox(), COLOR.hurtbox);
     const attack = scene.heroAttackBox();
     if (attack) rect(attack, COLOR.attack, true);
     for (const w of scene.waves) rect(scene.waveBox(w), COLOR.wave, true);
@@ -105,7 +105,7 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
   };
   // 傷害數字與「已造成段數／上限」：飄起來再淡出。命中回復的 MP 不管顯示開著沒都要記
   let mpFromHits = 0;
-  const onHit = (g: Grunt, result: HitResult, damage: number, attack: AttackInstance) => {
+  const onHit = (g: Enemy, result: HitResult, damage: number, attack: AttackInstance) => {
     if (result === 'damage') mpFromHits += attack.spec.mp;
     if (!shown) return;
     const count = attack.contacts.get(g.logic)?.count ?? 0;
@@ -131,10 +131,10 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
   cheat(KEY.TWO, () => (hero.logic.hp = HERO.hpMax));
   cheat(KEY.THREE, () => (hero.logic.invincible = !hero.logic.invincible));
   cheat(KEY.FOUR, () => {
-    for (const g of scene.grunts) {
-      g.logic.hp = 0;
-      g.logic.dying = true;
-      hurtGrunt(g.logic, 0);
+    for (const e of scene.enemies) {
+      e.logic.hp = 0;
+      e.logic.dying = true;
+      hurtEnemy(e.logic, 0);
     }
   });
   cheat(KEY.BACKTICK, () => (shown = !shown));
@@ -161,7 +161,7 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
           mp: hero.logic.mp,
           invincible: hero.logic.invincible,
         },
-        enemies: scene.grunts.map((g) => ({ x: g.x, y: g.y, state: GruntState[g.logic.state], facing: g.logic.facing, hp: g.logic.hp })),
+        enemies: scene.enemies.map((e) => ({ kind: e.logic.kind, x: e.x, y: e.y, state: EnemyState[e.logic.state], facing: e.logic.facing, hp: e.logic.hp })),
         items: scene.items.map((i) => ({ kind: i.kind, x: i.sprite.x, y: i.sprite.y })),
         mpFromHits,
         waves: scene.waves.map((w) => ({ x: w.sprite.x, y: w.sprite.y, fromX: w.fromX })),

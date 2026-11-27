@@ -1,5 +1,5 @@
 // 一關的 3 張小地圖與關卡流程：座標是世界座標，地面 y＝GROUND_Y，地圖兩端是牆，入口在左端、門在右端
-import { GROUND_Y, HERO, WORLD_WIDTH } from './tuning';
+import { GROUND_Y, HERO, WORLD_WIDTH, type EnemyKind } from './tuning';
 
 /** 單向平台：只有上緣擋得住，從下面跳得上去。x 是左緣、top 是上緣的 y，寬是一個地板方格（240）的倍數 */
 export interface Platform {
@@ -11,7 +11,7 @@ export interface Platform {
 export interface MapData {
   platforms: Platform[];
   /** 敵人的腳底 x；敵人只走地面 */
-  enemies: { kind: 'grunt'; x: number }[];
+  enemies: { kind: EnemyKind; x: number }[];
   /** 道具的腳底：放在地面（GROUND_Y）或平台的上緣 */
   items: { kind: 'hp' | 'mp'; x: number; y: number }[];
   /** 程式畫的背景：天空、遠山、地面兩色 */
