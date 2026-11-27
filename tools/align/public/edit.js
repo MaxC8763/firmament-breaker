@@ -12,14 +12,49 @@ export function toLocal([sx, sy], { pivot: [px, py], zoom, flipped }) {
 
 export const get = (hb, path) => path.reduce((o, k) => o?.[k], hb);
 
+/** 這一格的攻擊框在判定框資料裡的位置：perFrame 有這一格就用它，否則用這招的共用框；這招沒有攻擊框是 null */
+export function attackPath(hb, action, file) {
+  if (hb.perFrame?.[action]?.[file]) return ['perFrame', action, file];
+  const shared = hb.byAction?.[action];
+  return shared ? ['attacks', shared] : null;
+}
+
+/** 這一格實際用的攻擊框（遊戲在 active 格也照這個規則查） */
+export const attackShape = (hb, action, file) => {
+  const path = attackPath(hb, action, file);
+  return path ? get(hb, path) : undefined;
+};
+
+/** 這一格單獨設定：複製共用框當起點，回傳新的 perFrame（之後改它不會動到共用框） */
+export function splitFrame(hb, action, file) {
+  const shared = hb.attacks[hb.byAction[action]];
+  return { ...hb.perFrame, [action]: { ...hb.perFrame?.[action], [file]: structuredClone(shared) } };
+}
+
+/** 改回共用框：刪掉這一格，這招沒有逐格框了就連動作一起刪；其他的順序不變，回傳新的 perFrame */
+export function joinFrame(perFrame, action, file) {
+  const out = {};
+  for (const [a, frames] of Object.entries(perFrame)) {
+    const rest = Object.fromEntries(Object.entries(frames).filter(([f]) => a !== action || f !== file));
+    if (Object.keys(rest).length) out[a] = rest;
+  }
+  return out;
+}
+
+/** 共用框被哪些動作用、其中幾格單獨設定了 */
+export function sharedBy(hb, attack) {
+  const actions = Object.keys(hb.byAction).filter((a) => hb.byAction[a] === attack);
+  return { actions, frames: actions.reduce((n, a) => n + Object.keys(hb.perFrame?.[a] ?? {}).length, 0) };
+}
+
 /** 一格要畫、能改的框：role＝框的角色（換格時選取跟著角色走），path＝它在判定框資料裡的位置 */
-export function boxesOf(hb, group) {
+export function boxesOf(hb, group, file) {
   const name = group.split('/').pop();
   const out = [];
   if (group.startsWith('hero/')) {
     out.push({ role: 'body', path: ['body'] }, { role: 'hurtbox', path: ['hurtbox'] });
-    const attack = hb.byAction?.[name];
-    if (attack) out.push({ role: 'attack', path: ['attacks', attack] });
+    const attack = attackPath(hb, name, file);
+    if (attack) out.push({ role: 'attack', path: attack });
     // 長條劍氣在 A 的斬擊判定時生成，座標同樣相對主角腳底
     if (name === 'a_slash') out.push({ role: 'beam', path: ['attacks', 'a_beam'] });
   } else {

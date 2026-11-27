@@ -141,4 +141,32 @@ test.describe('編輯判定框', () => {
     writeFileSync(ALIGN_HITBOXES, saved().replace('"w": 210, "h": 250', '"w": 210, "h": 260'));
     await page.waitForFunction(() => (window as any).__align.getState().selected?.shape.h === 260);
   });
+
+  test('逐格：x1_01 單獨設定再拖，只影響這一格；改回共用框再存，檔案回到原樣', async ({ page }) => {
+    const before = saved();
+    const shared = JSON.parse(before).attacks.x_slash;
+    const at = await openX1(page);
+    await page.locator('#split').click();
+    expect((await alignState(page)).selected).toMatchObject({ role: 'attack', path: 'perFrame.x1.x1_01' });
+    await dragRight(page, at(shared.x + shared.w, shared.y), -40);
+    await page.keyboard.press('Control+s');
+    await page.waitForFunction(() => (window as any).__align.getState().message === '已儲存');
+    const data = JSON.parse(saved());
+    expect(data.perFrame).toEqual({ x1: { x1_01: { ...shared, w: shared.w - 20 } } });
+    expect(data.attacks.x_slash).toEqual(shared);
+    await expect(page.locator('#list .frames button.own')).toHaveText(['x1_01']);
+
+    await page.keyboard.press('ArrowRight');
+    await drawn(page, 'hero/x1/x1_02');
+    expect((await alignState(page)).selected).toMatchObject({ path: 'attacks.x_slash', shape: shared });
+
+    await page.keyboard.press('ArrowLeft');
+    await drawn(page, 'hero/x1/x1_01');
+    await page.locator('#join').click();
+    await page.keyboard.press('Control+s');
+    await page.waitForFunction(() => (window as any).__align.getState().message === '已儲存');
+    expect(JSON.parse(saved()).perFrame).toEqual({});
+    expect(saved()).toBe(before);
+    await expect(page.locator('#list .frames button.own')).toHaveCount(0);
+  });
 });

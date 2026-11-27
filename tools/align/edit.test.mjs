@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { boxesOf, contains, drag, fieldsOf, handlesOf, hitTest, setField, toLocal } from './public/edit.js';
+import { attackShape, boxesOf, contains, drag, fieldsOf, handlesOf, hitTest, joinFrame, setField, sharedBy, splitFrame, toLocal } from './public/edit.js';
 
 const rect = { type: 'rect', x: 20, y: -250, w: 190, h: 250 };
 const circle = { type: 'circle', cx: 0, cy: -128, r: 210, arc: [-90, 180] };
@@ -135,5 +135,50 @@ describe('一格畫出哪些框', () => {
 
   test('框的資料就是判定框檔裡的那一個物件', () => {
     expect(boxesOf(hb, 'hero/x1')[2].shape).toBe(hb.attacks.x_slash);
+  });
+});
+
+describe('逐格判定框', () => {
+  const hb = JSON.parse(readFileSync('src/data/hitboxes.json', 'utf8'));
+  const own = { type: 'rect', x: 30, y: -240, w: 170, h: 240 };
+  const withOwn = { ...hb, perFrame: { x1: { x1_01: own } } };
+
+  test('這一格用哪個框：有逐格框就用它，沒有就用這招的共用框；這招沒有攻擊框是 undefined', () => {
+    expect(attackShape(withOwn, 'x1', 'x1_01')).toBe(own);
+    expect(attackShape(withOwn, 'x1', 'x1_02')).toBe(hb.attacks.x_slash);
+    expect(attackShape(withOwn, 'x2', 'x2_01')).toBe(hb.attacks.x_slash);
+    expect(attackShape(withOwn, 'idle', 'idle_00')).toBeUndefined();
+  });
+
+  test('非 active 格寫了逐格框也查得到：判定只在 active 格生效是遊戲那邊決定的', () => {
+    const recovery = { ...hb, perFrame: { x1: { x1_03: own } } };
+    expect(attackShape(recovery, 'x1', 'x1_03')).toBe(own);
+  });
+
+  test('畫出的攻擊框跟著這一格走', () => {
+    const paths = (file) => boxesOf(withOwn, 'hero/x1', file).map((b) => b.path.join('.'));
+    expect(paths('x1_01')).toEqual(['body', 'hurtbox', 'perFrame.x1.x1_01']);
+    expect(paths('x1_02')).toEqual(['body', 'hurtbox', 'attacks.x_slash']);
+  });
+
+  test('這一格單獨設定：複製共用框當起點，改它不影響共用框；其他逐格框保留', () => {
+    const perFrame = splitFrame({ ...withOwn, perFrame: { x1: { x1_01: own } } }, 'x1', 'x1_02');
+    expect(perFrame).toEqual({ x1: { x1_01: own, x1_02: hb.attacks.x_slash } });
+    perFrame.x1.x1_02.w = 1;
+    expect(hb.attacks.x_slash.w).toBe(190);
+    expect(splitFrame(hb, 'c_dash', 'c_dash_01')).toEqual({ c_dash: { c_dash_01: hb.attacks.c_dash } });
+  });
+
+  test('改回共用框：刪掉這一格，這招沒有逐格框了就連動作一起刪，其他的順序不變', () => {
+    const perFrame = { x1: { x1_01: own, x1_02: own }, x2: { x2_01: own } };
+    expect(Object.keys(joinFrame(perFrame, 'x1', 'x1_01'))).toEqual(['x1', 'x2']);
+    expect(joinFrame(perFrame, 'x1', 'x1_01')).toEqual({ x1: { x1_02: own }, x2: { x2_01: own } });
+    expect(joinFrame(perFrame, 'x2', 'x2_01')).toEqual({ x1: { x1_01: own, x1_02: own } });
+    expect(joinFrame({ x1: { x1_01: own } }, 'x1', 'x1_01')).toEqual({});
+  });
+
+  test('共用框提示：哪些動作用它、其中幾格單獨設定', () => {
+    expect(sharedBy(withOwn, 'x_slash')).toEqual({ actions: ['x1', 'x2', 'x3'], frames: 1 });
+    expect(sharedBy(hb, 'c_dash')).toEqual({ actions: ['c_dash'], frames: 0 });
   });
 });

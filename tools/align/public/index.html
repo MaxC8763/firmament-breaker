@@ -13,6 +13,7 @@
       #list .frames button { font: 11px monospace; padding: 1px 4px; border: 1px solid #889; background: #fff; border-radius: 3px; cursor: pointer; }
       #list .frames button.ph { color: #9aa; border-color: #ccd; }
       #list .frames button.on { outline: 2px solid #3366ff; }
+      #list .frames button.own::after { content: '◆'; color: #e5383b; margin-left: 2px; }
       #list .frames button.warn, #list .badge.warn { background: #ffe58a; color: #5a4300; }
       #list .frames button.bad, #list .badge.bad { background: #e5383b; color: #fff; }
       main { overflow: auto; padding: 8px 12px; }
@@ -52,6 +53,7 @@
         <span id="boxlist"></span>
         <span id="fields"></span>
         <span id="shared"></span>
+        <span><button id="split" hidden>這一格單獨設定</button><button id="join" hidden>改回共用框</button></span>
         <span><button id="save" disabled>儲存（Ctrl+S）</button> <button id="discard" disabled>放棄修改</button> <span id="status"></span></span>
       </div>
       <canvas id="stage"></canvas>

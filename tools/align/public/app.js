@@ -1,6 +1,6 @@
 // 美術對齊工具：畫出每一格和腳底、地平線、佔位圖、判定框的關係（Canvas 2D，不靠遊戲引擎）；判定框可以直接拖拉、打數字修改
 import { bodyWarning, checkFrame, worst } from './checks.js';
-import { boxesOf, drag, fieldValue, fieldsOf, get, handlesOf, hitTest, setField, toLocal } from './edit.js';
+import { boxesOf, drag, fieldValue, fieldsOf, get, handlesOf, hitTest, joinFrame, setField, sharedBy, splitFrame, toLocal } from './edit.js';
 import { drawCutin, drawDialog, drawGame, drawHandles, drawShape } from './preview.js';
 
 const $ = (id) => document.getElementById(id);
@@ -63,6 +63,7 @@ async function pollHitboxes() {
   } catch {
     return; // 檔案正寫到一半、或暫時不是合法的 JSON：下一秒再試
   }
+  highlight();
   draw();
 }
 
@@ -89,8 +90,21 @@ async function save() {
 async function discard() {
   await loadHitboxes();
   state.message = '已放棄修改';
+  highlight();
   draw();
 }
+
+// 逐格：這一格單獨設定（複製共用框當起點）、改回共用框
+function changeFrame(make) {
+  const action = state.group.split('/').pop();
+  state.hitboxes.perFrame = make(action, frames()[state.index].file);
+  state.selected = 'attack';
+  state.message = '';
+  highlight();
+  draw();
+}
+const split = () => changeFrame((action, file) => splitFrame(state.hitboxes, action, file));
+const join = () => changeFrame((action, file) => joinFrame(state.hitboxes.perFrame ?? {}, action, file));
 
 // ---------- 圖：網址帶修改時間，重新匯出後才會換新 ----------
 const cache = new Map();
@@ -152,8 +166,11 @@ function renderList() {
 
 function highlight() {
   for (const el of document.querySelectorAll('#list summary')) el.classList.toggle('on', el.dataset.group === state.group);
-  for (const el of document.querySelectorAll('#list .frames button'))
+  for (const el of document.querySelectorAll('#list .frames button')) {
     el.classList.toggle('on', el.dataset.group === state.group && Number(el.dataset.index) === state.index);
+    // 攻擊框單獨設定過的格加記號
+    el.classList.toggle('own', !!state.hitboxes?.perFrame?.[el.dataset.group.split('/').pop()]?.[el.textContent]);
+  }
 }
 
 function renderExpressions() {
@@ -216,7 +233,7 @@ function draw() {
 const LOOK = {
   body: { color: '#2b9348', label: () => 'body（物理）' },
   hurtbox: { color: '#2f6fde', label: () => 'hurtbox（被打）' },
-  attack: { color: '#e5383b', label: (path) => `攻擊框 ${path.at(-1)}` },
+  attack: { color: '#e5383b', label: (path) => (path[0] === 'perFrame' ? `攻擊框 ${path[2]}（這一格單獨設定）` : `攻擊框 ${path.at(-1)}`) },
   beam: { color: '#f08c00', label: () => '長條劍氣 a_beam' },
   projectile: { color: '#e5383b', label: (path) => `發射物 ${path.at(-1)}` },
 };
@@ -224,7 +241,7 @@ const LOOK = {
 /** 這一格畫出來、能改的框；「判定框」沒勾就沒有 */
 function boxesFor(f) {
   if (!state.hitboxes || !$('boxes').checked || state.mode !== 'action' || !f) return [];
-  return boxesOf(state.hitboxes, state.group).map((b) => ({
+  return boxesOf(state.hitboxes, state.group, f.file).map((b) => ({
     ...b,
     color: LOOK[b.role].color,
     style: b.role === 'body' || b.role === 'hurtbox' ? 'line' : b.role === 'projectile' || f.phase === 'active' ? 'fill' : 'dash',
@@ -288,7 +305,7 @@ function drawActionMode() {
   ctx.strokeRect(t / 2, t / 2, W - t, H - t);
   cross(px, py, t);
 
-  const attack = state.hitboxes && (boxesOf(state.hitboxes, state.group).find((b) => b.role === 'attack')?.shape ?? state.hitboxes.attacks.x_slash);
+  const attack = state.hitboxes && (boxesOf(state.hitboxes, state.group, f.file).find((b) => b.role === 'attack')?.shape ?? state.hitboxes.attacks.x_slash);
   const reach = attack ? (attack.type === 'circle' ? attack.cx + attack.r : attack.x + attack.w) : 200;
   drawGame(pctx, PREVIEW_SCALE, { img: main, canvas: m.canvas, pivot: [px, py], flipped: state.flipped, boxes, reach });
 
@@ -328,8 +345,13 @@ function renderEdit(boxes) {
   for (const input of $('fields').querySelectorAll('input'))
     if (sel && input !== document.activeElement) input.value = fieldValue(sel.shape, input.dataset.field);
   const hint = boxes.length ? '點畫布上的框選取：拖框內移動，拖白色控制點改大小' : '';
-  const shared = sel?.role === 'attack' ? `共用框 ${sel.path.at(-1)}：${usersOf(sel.path.at(-1)).join('、')} 的判定格都用它` : '';
-  $('shared').textContent = sel ? shared : hint;
+  $('shared').textContent = sel ? (sel.role === 'attack' ? attackNote(sel.path) : '') : hint;
+  // 逐格：這一格有攻擊框才顯示；單獨設定只能在 active 格新增
+  const attack = boxes.find((b) => b.role === 'attack');
+  const own = attack?.path[0] === 'perFrame';
+  $('split').hidden = !attack || own;
+  $('split').disabled = frames()[state.index]?.phase !== 'active';
+  $('join').hidden = !own;
   const changed = dirty();
   $('save').disabled = !changed;
   $('discard').disabled = !changed;
@@ -337,7 +359,11 @@ function renderEdit(boxes) {
   $('status').classList.toggle('warn', changed);
 }
 
-const usersOf = (attack) => Object.keys(state.hitboxes.byAction).filter((a) => state.hitboxes.byAction[a] === attack);
+function attackNote(path) {
+  if (path[0] === 'perFrame') return `這一格單獨設定，只影響 ${path[2]}`;
+  const { actions, frames: own } = sharedBy(state.hitboxes, path[1]);
+  return `共用框 ${path[1]}：${actions.join('、')} 的判定格都用它${own ? `（${own} 格單獨設定）` : ''}`;
+}
 
 function numberField(field, text) {
   const input = Object.assign(document.createElement('input'), { type: 'number', step: 1 });
@@ -478,6 +504,8 @@ addEventListener('keydown', (e) => {
 $('play').onclick = togglePlay;
 $('save').onclick = save;
 $('discard').onclick = discard;
+$('split').onclick = split;
+$('join').onclick = join;
 // 有未儲存的修改時關分頁或重新整理，瀏覽器會先問
 addEventListener('beforeunload', (e) => {
   if (!dirty()) return;
