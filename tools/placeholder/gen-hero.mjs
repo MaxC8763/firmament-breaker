@@ -19,7 +19,7 @@
  * - 底線開頭的檔案或資料夾（例如 _preview/）是預覽用，管線應略過。
  */
 import sharp from 'sharp';
-import { mkdir, writeFile, rm, access } from 'node:fs/promises';
+import { mkdir, writeFile, rm, access, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const argv = process.argv.slice(2);
@@ -567,30 +567,24 @@ async function main() {
   console.log(`完成：${count} 張 PNG → ${OUT}`);
 }
 
-// ---------------- 預覽總表（--sheet）；判定框數字只供預覽，正式資料以 src/data/hitboxes.json 為準 ----------------
-const PREVIEW = {
-  hurtbox: { x: -34, y: -222, w: 68, h: 222 },
-  byAction: {
-    x1: { x: 20, y: -250, w: 190, h: 250 },
-    x2: { x: 20, y: -250, w: 190, h: 250 },
-    x3: { x: 20, y: -250, w: 190, h: 250 },
-    c_dash: { x: -34, y: -222, w: 240, h: 222 },
-    a_slash: { x: 20, y: -250, w: 190, h: 250 },
-    d_slash: { cx: 0, cy: -128, r: 210 },
-  },
-};
+// ---------------- 預覽總表（--sheet）；判定框直接讀遊戲用的 src/data/hitboxes.json ----------------
+const HB = JSON.parse(await readFile(new URL('../../src/data/hitboxes.json', import.meta.url), 'utf8'));
 function boxSVG(b, stroke, fill, sw) {
-  if (b.r) {
-    const x0 = HERO.px + b.cx - b.r, x1 = HERO.px + b.cx + b.r, y = HERO.py + b.cy;
-    return `<path d="M ${x0} ${y} A ${b.r} ${b.r} 0 0 1 ${x1} ${y} Z" fill="${fill}" fill-opacity="0.15" stroke="${stroke}" stroke-width="${sw}"/>`;
-  }
-  return `<rect x="${HERO.px + b.x}" y="${HERO.py + b.y}" width="${b.w}" height="${b.h}" fill="${fill}" fill-opacity="0.15" stroke="${stroke}" stroke-width="${sw}"/>`;
+  const paint = `fill="${fill}" fill-opacity="0.15" stroke="${stroke}" stroke-width="${sw}"`;
+  if (b.type === 'rect') return `<rect x="${HERO.px + b.x}" y="${HERO.py + b.y}" width="${b.w}" height="${b.h}" ${paint}/>`;
+  const cx = HERO.px + b.cx, cy = HERO.py + b.cy;
+  if (!b.arc) return `<circle cx="${cx}" cy="${cy}" r="${b.r}" ${paint}/>`;
+  // arc＝[起, 迄] 度：0＝正前方、90＝正上方；SVG 的 y 朝下
+  const pt = (d) => `${cx + b.r * Math.cos((d * Math.PI) / 180)} ${cy - b.r * Math.sin((d * Math.PI) / 180)}`;
+  const large = b.arc[1] - b.arc[0] > 180 ? 1 : 0;
+  return `<path d="M ${cx} ${cy} L ${pt(b.arc[0])} A ${b.r} ${b.r} 0 ${large} 0 ${pt(b.arc[1])} Z" ${paint}/>`;
 }
 function overlayDoc(action, meta) {
+  const attack = meta.phase === 'active' && HB.attacks[HB.byAction[action]];
   let s = `<line x1="0" y1="${HERO.py}" x2="${HERO.w}" y2="${HERO.py}" stroke="#8a97a6" stroke-width="1.2"/>` +
     `<path d="M ${HERO.px - 9} ${HERO.py} H ${HERO.px + 9} M ${HERO.px} ${HERO.py - 9} V ${HERO.py + 9}" stroke="#e0218a" stroke-width="2"/>` +
-    boxSVG(PREVIEW.hurtbox, '#2f6fde', 'none', 1.4);
-  if (meta.phase === 'active' && PREVIEW.byAction[action]) s += boxSVG(PREVIEW.byAction[action], '#e5383b', '#e5383b', 2);
+    boxSVG(HB.hurtbox, '#2f6fde', 'none', 1.4);
+  if (attack) s += boxSVG(attack, '#e5383b', '#e5383b', 2);
   return svgDoc(HERO.w, HERO.h, s);
 }
 const CROP = { x: 124, y: 162, w: 520, h: 350 };

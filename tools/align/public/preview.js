@@ -7,7 +7,15 @@ const SCREEN = { w: 1920, h: 1080, ground: 900 };
 export function drawShape(ctx, s, ox, oy, color, style) {
   ctx.beginPath();
   if (s.type === 'circle') {
-    ctx.arc(ox + s.cx, oy + s.cy, s.r, s.upperHalf ? Math.PI : 0, 2 * Math.PI);
+    const x = ox + s.cx, y = oy + s.cy;
+    if (s.arc) {
+      // arc＝[起, 迄] 度：0＝正前方、90＝正上方，從起往角度變大的方向轉到迄；畫布的 y 朝下，所以角度取負、逆時針畫
+      const [from, to] = s.arc.map((d) => (-d * Math.PI) / 180);
+      ctx.moveTo(x, y);
+      ctx.arc(x, y, s.r, from, to, true);
+    } else {
+      ctx.arc(x, y, s.r, 0, 2 * Math.PI);
+    }
     ctx.closePath();
   } else {
     ctx.rect(ox + s.x, oy + s.y, s.w, s.h);

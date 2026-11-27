@@ -6,7 +6,7 @@
     "c_dash":  { "type": "rect", "x": -34, "y": -222, "w": 240, "h": 222 },
     "a_slash": { "type": "rect", "x": 20, "y": -250, "w": 190, "h": 250 },
     "a_beam":  { "type": "rect", "x": 40, "y": -240, "w": 2880, "h": 240 },
-    "d_slash": { "type": "circle", "cx": 0, "cy": -128, "r": 210, "upperHalf": true }
+    "d_slash": { "type": "circle", "cx": 0, "cy": -128, "r": 210, "arc": [-90, 180] }
   },
   "byAction": { "x1": "x_slash", "x2": "x_slash", "x3": "x_slash", "c_dash": "c_dash", "a_slash": "a_slash", "d_slash": "d_slash" },
   "projectiles": {
