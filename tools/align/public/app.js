@@ -1,6 +1,7 @@
-// 美術對齊工具：畫出每一格和腳底、地平線、佔位圖、判定框的關係（Canvas 2D，不靠遊戲引擎）
-import { checkFrame, worst } from './checks.js';
-import { drawCutin, drawDialog, drawGame, drawShape } from './preview.js';
+// 美術對齊工具：畫出每一格和腳底、地平線、佔位圖、判定框的關係（Canvas 2D，不靠遊戲引擎）；判定框可以直接拖拉、打數字修改
+import { bodyWarning, checkFrame, worst } from './checks.js';
+import { boxesOf, drag, fieldValue, fieldsOf, get, handlesOf, hitTest, joinFrame, setField, sharedBy, splitFrame, toLocal } from './edit.js';
+import { drawCutin, drawDialog, drawGame, drawHandles, drawShape } from './preview.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('stage');
@@ -12,6 +13,8 @@ const state = {
   manifest: null, text: '', hitboxes: null,
   mode: 'action', expression: 'normal',
   group: null, index: 0, playing: false, flipped: false, zoom: 1, drawn: null,
+  selected: null, dragging: null, // selected 記框的角色，換格時選取跟著角色走
+  base: '', baseJson: '', message: '', // base＝讀到的判定框檔原文，存檔時送回去讓伺服器確認檔案沒在工具外被改過
 };
 
 const animGroups = () => Object.keys(state.manifest.groups).filter((g) => state.manifest.groups[g].frames);
@@ -39,6 +42,69 @@ async function refresh() {
   renderExpressions();
   draw();
 }
+
+// ---------- 判定框：讀檔、存檔、放棄修改；沒有未儲存的修改時每秒重讀，在工具外改的檔也會換新 ----------
+async function loadHitboxes() {
+  const text = await (await fetch('hitboxes.json', { cache: 'no-store' })).text();
+  state.hitboxes = JSON.parse(text);
+  state.base = text;
+  state.baseJson = JSON.stringify(state.hitboxes);
+}
+const dirty = () => !!state.hitboxes && JSON.stringify(state.hitboxes) !== state.baseJson;
+
+async function pollHitboxes() {
+  if (dirty() || state.dragging) return;
+  try {
+    const text = await (await fetch('hitboxes.json', { cache: 'no-store' })).text();
+    if (text === state.base || dirty() || state.dragging) return;
+    state.hitboxes = JSON.parse(text);
+    state.base = text;
+    state.baseJson = JSON.stringify(state.hitboxes);
+  } catch {
+    return; // 檔案正寫到一半、或暫時不是合法的 JSON：下一秒再試
+  }
+  highlight();
+  draw();
+}
+
+async function save() {
+  if (!dirty()) return;
+  try {
+    const res = await fetch('hitboxes.json', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ base: state.base, data: state.hitboxes }),
+    });
+    const body = await res.json();
+    if (res.ok) {
+      state.base = body.text;
+      state.baseJson = JSON.stringify(JSON.parse(body.text));
+    }
+    state.message = res.ok ? '已儲存' : `沒有存：${body.error}`;
+  } catch (e) {
+    state.message = `沒有存：${e.message}`;
+  }
+  draw();
+}
+
+async function discard() {
+  await loadHitboxes();
+  state.message = '已放棄修改';
+  highlight();
+  draw();
+}
+
+// 逐格：這一格單獨設定（複製共用框當起點）、改回共用框
+function changeFrame(make) {
+  const action = state.group.split('/').pop();
+  state.hitboxes.perFrame = make(action, frames()[state.index].file);
+  state.selected = 'attack';
+  state.message = '';
+  highlight();
+  draw();
+}
+const split = () => changeFrame((action, file) => splitFrame(state.hitboxes, action, file));
+const join = () => changeFrame((action, file) => joinFrame(state.hitboxes.perFrame ?? {}, action, file));
 
 // ---------- 圖：網址帶修改時間，重新匯出後才會換新 ----------
 const cache = new Map();
@@ -100,8 +166,11 @@ function renderList() {
 
 function highlight() {
   for (const el of document.querySelectorAll('#list summary')) el.classList.toggle('on', el.dataset.group === state.group);
-  for (const el of document.querySelectorAll('#list .frames button'))
+  for (const el of document.querySelectorAll('#list .frames button')) {
     el.classList.toggle('on', el.dataset.group === state.group && Number(el.dataset.index) === state.index);
+    // 攻擊框單獨設定過的格加記號
+    el.classList.toggle('own', !!state.hitboxes?.perFrame?.[el.dataset.group.split('/').pop()]?.[el.textContent]);
+  }
 }
 
 function renderExpressions() {
@@ -154,20 +223,35 @@ function draw() {
   if (!state.manifest) return;
   for (const b of document.querySelectorAll('[data-mode]')) b.classList.toggle('on', b.dataset.mode === state.mode);
   $('exprs').hidden = state.mode !== 'portrait';
+  $('edit').hidden = state.mode !== 'action';
   if (state.mode === 'portrait') drawPortraitMode();
   else if (state.mode === 'cutin') drawCutinMode();
   else drawActionMode();
 }
 
+// 框的顏色與名稱；攻擊框、長條劍氣在 active 格實心、其他格虛線，發射物一律實心
+const LOOK = {
+  body: { color: '#2b9348', label: () => 'body（物理）' },
+  hurtbox: { color: '#2f6fde', label: () => 'hurtbox（被打）' },
+  attack: { color: '#e5383b', label: (path) => (path[0] === 'perFrame' ? `攻擊框 ${path[2]}（這一格單獨設定）` : `攻擊框 ${path.at(-1)}`) },
+  beam: { color: '#f08c00', label: () => '長條劍氣 a_beam' },
+  projectile: { color: '#e5383b', label: (path) => `發射物 ${path.at(-1)}` },
+};
+
+/** 這一格畫出來、能改的框；「判定框」沒勾就沒有 */
 function boxesFor(f) {
-  const hb = state.hitboxes;
-  if (!hb || !$('boxes').checked) return [];
-  const name = state.group.split('/').pop();
-  const hero = state.group.startsWith('hero/');
-  const out = hero ? [{ shape: hb.hurtbox, color: '#2f6fde', style: 'line' }] : [];
-  const attack = hero ? hb.attacks[hb.byAction[name]] : hb.projectiles?.[name];
-  if (attack) out.push({ shape: attack, color: '#e5383b', style: !hero || f.phase === 'active' ? 'fill' : 'dash' });
-  return out;
+  if (!state.hitboxes || !$('boxes').checked || state.mode !== 'action' || !f) return [];
+  return boxesOf(state.hitboxes, state.group, f.file).map((b) => ({
+    ...b,
+    color: LOOK[b.role].color,
+    style: b.role === 'body' || b.role === 'hurtbox' ? 'line' : b.role === 'projectile' || f.phase === 'active' ? 'fill' : 'dash',
+  }));
+}
+const currentBoxes = () => boxesFor(frames()[state.index]);
+const selectedBox = () => currentBoxes().find((b) => b.role === state.selected);
+function setShape(path, shape) {
+  get(state.hitboxes, path.slice(0, -1))[path.at(-1)] = shape;
+  state.message = '';
 }
 
 function drawActionMode() {
@@ -200,6 +284,8 @@ function drawActionMode() {
   ctx.globalAlpha = 1;
   const boxes = boxesFor(f);
   for (const b of boxes) drawShape(ctx, b.shape, px, py, b.color, b.style);
+  const sel = boxes.find((b) => b.role === state.selected);
+  if (sel) drawHandles(ctx, handlesOf(sel.shape), px, py, t);
   ctx.restore();
 
   // 參考線：地平線（腳底那條橫線的正下方）、中線、畫布邊框、腳底十字；寬度固定 1 個螢幕像素
@@ -219,17 +305,118 @@ function drawActionMode() {
   ctx.strokeRect(t / 2, t / 2, W - t, H - t);
   cross(px, py, t);
 
-  const attack = state.hitboxes && (state.hitboxes.attacks[state.hitboxes.byAction[state.group.split('/').pop()]] ?? state.hitboxes.attacks.x_slash);
+  const attack = state.hitboxes && (boxesOf(state.hitboxes, state.group, f.file).find((b) => b.role === 'attack')?.shape ?? state.hitboxes.attacks.x_slash);
   const reach = attack ? (attack.type === 'circle' ? attack.cx + attack.r : attack.x + attack.w) : 200;
   drawGame(pctx, PREVIEW_SCALE, { img: main, canvas: m.canvas, pivot: [px, py], flipped: state.flipped, boxes, reach });
 
   state.drawn = main && (!f.fx || fx || !$('fx').checked) ? k : null;
+  const body = state.group.startsWith('hero/') && bodyWarning(state.hitboxes);
   info([
     `${state.group}　第 ${state.index + 1}／${list.length} 格　${f.file}　來源 ${img?.source ?? '沒有圖'}　hold ${f.hold}` +
       `${f.phase ? '　' + f.phase : ''}${f.grounded ? `　貼地（離地平線 ${img?.ground ?? '?'} px）` : ''}${state.flipped ? '　面向左' : ''}`,
     ...warnings.map((w) => ({ level: w.level === 'warn' ? 'warn' : 'bad', text: `⚠ ${w.text}` })),
+    ...(body ? [{ level: 'warn', text: `⚠ ${body}` }] : []),
   ]);
+  renderEdit(boxes);
 }
+
+// ---------- 編輯面板：這一格的框清單、選中的框的數字欄、共用框提示 ----------
+function renderEdit(boxes) {
+  const sel = boxes.find((b) => b.role === state.selected);
+  // 框或選取換了才重建；拖拉時只更新數字，正在打字的欄位不動
+  const key = `${boxes.map((b) => b.path.join('.')).join('|')}#${sel ? sel.path.join('.') + fieldsOf(sel.shape).length : ''}`;
+  if ($('edit').dataset.key !== key) {
+    $('edit').dataset.key = key;
+    $('boxlist').replaceChildren(
+      ...boxes.map((b) => {
+        const button = document.createElement('button');
+        button.dataset.role = b.role;
+        button.classList.toggle('on', b === sel);
+        button.append(Object.assign(document.createElement('span'), { className: 'sw', style: `background: ${b.color}` }), LOOK[b.role].label(b.path));
+        button.onclick = () => {
+          state.selected = b.role;
+          draw();
+        };
+        return button;
+      }),
+    );
+    $('fields').replaceChildren(...(sel ? fieldsOf(sel.shape).map(([field, text]) => numberField(field, text)) : []));
+  }
+  for (const input of $('fields').querySelectorAll('input'))
+    if (sel && input !== document.activeElement) input.value = fieldValue(sel.shape, input.dataset.field);
+  const hint = boxes.length ? '點畫布上的框選取：拖框內移動，拖白色控制點改大小' : '';
+  $('shared').textContent = sel ? (sel.role === 'attack' ? attackNote(sel.path) : '') : hint;
+  // 逐格：這一格有攻擊框才顯示；單獨設定只能在 active 格新增
+  const attack = boxes.find((b) => b.role === 'attack');
+  const own = attack?.path[0] === 'perFrame';
+  $('split').hidden = !attack || own;
+  $('split').disabled = frames()[state.index]?.phase !== 'active';
+  $('join').hidden = !own;
+  const changed = dirty();
+  $('save').disabled = !changed;
+  $('discard').disabled = !changed;
+  $('status').textContent = changed ? ['未儲存', state.message].filter(Boolean).join('　') : state.message;
+  $('status').classList.toggle('warn', changed);
+}
+
+function attackNote(path) {
+  if (path[0] === 'perFrame') return `這一格單獨設定，只影響 ${path[2]}`;
+  const { actions, frames: own } = sharedBy(state.hitboxes, path[1]);
+  return `共用框 ${path[1]}：${actions.join('、')} 的判定格都用它${own ? `（${own} 格單獨設定）` : ''}`;
+}
+
+function numberField(field, text) {
+  const input = Object.assign(document.createElement('input'), { type: 'number', step: 1 });
+  input.dataset.field = field;
+  // 打到合格的值才套用；離開欄位時換回目前的值（打到一半不合格的會被丟掉）
+  input.oninput = () => {
+    const box = selectedBox();
+    const next = box && setField(box.shape, field, input.valueAsNumber);
+    if (!next) return;
+    setShape(box.path, next);
+    draw();
+  };
+  input.onchange = () => {
+    const box = selectedBox();
+    if (box) input.value = fieldValue(box.shape, field);
+  };
+  const label = document.createElement('label');
+  label.append(`${text} `, input);
+  return label;
+}
+
+// ---------- 拖拉：按在已選框的控制點上改大小，按在框內移動，按在空白處取消選取 ----------
+function localPoint(e) {
+  const [W, H] = meta().canvas;
+  return toLocal([e.offsetX, e.offsetY], { pivot: meta().pivot ?? [W / 2, H / 2], zoom: state.zoom, flipped: state.flipped });
+}
+const grab = (e) => hitTest(currentBoxes(), localPoint(e), { selected: state.selected, tolerance: 6 / state.zoom });
+const editing = () => state.manifest && state.mode === 'action' && meta()?.frames;
+
+canvas.addEventListener('pointerdown', (e) => {
+  if (!editing()) return;
+  const hit = grab(e);
+  state.selected = hit?.role ?? null;
+  state.playing = false;
+  const box = hit && selectedBox();
+  if (box) {
+    state.dragging = { handle: hit.handle, start: localPoint(e), shape: box.shape, path: box.path };
+    canvas.setPointerCapture(e.pointerId);
+  }
+  draw();
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!editing()) return;
+  const d = state.dragging;
+  if (!d) {
+    const hit = grab(e);
+    canvas.style.cursor = !hit ? '' : hit.handle === 'move' ? 'move' : 'crosshair';
+    return;
+  }
+  setShape(d.path, drag(d.shape, d.handle, d.start, localPoint(e)));
+  draw();
+});
+for (const type of ['pointerup', 'pointercancel']) canvas.addEventListener(type, () => (state.dragging = null));
 
 function drawPortraitMode() {
   const m = meta('portrait');
@@ -299,7 +486,13 @@ function togglePlay() {
 }
 
 addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS') {
+    e.preventDefault(); // 不要跳出瀏覽器的「另存網頁」
+    save();
+    return;
+  }
   if (!state.manifest || state.mode !== 'action') return;
+  if (e.target instanceof HTMLInputElement && e.target.type === 'number') return; // 在數字欄打字時，按鍵留給欄位
   if (e.code === 'Space') togglePlay();
   else if (e.code === 'ArrowRight') step(1);
   else if (e.code === 'ArrowLeft') step(-1);
@@ -309,6 +502,16 @@ addEventListener('keydown', (e) => {
   draw();
 });
 $('play').onclick = togglePlay;
+$('save').onclick = save;
+$('discard').onclick = discard;
+$('split').onclick = split;
+$('join').onclick = join;
+// 有未儲存的修改時關分頁或重新整理，瀏覽器會先問
+addEventListener('beforeunload', (e) => {
+  if (!dirty()) return;
+  e.preventDefault();
+  e.returnValue = '';
+});
 for (const b of document.querySelectorAll('[data-zoom]'))
   b.onclick = () => {
     state.zoom = Number(b.dataset.zoom);
@@ -326,19 +529,25 @@ window.__align = {
   getState() {
     const f = state.manifest && frames()[state.index];
     const img = f && state.manifest.images[keyOf(state.group, f)];
-    let warningCount = 0;
+    let warningCount = bodyWarning(state.hitboxes) ? 1 : 0;
     for (const g of state.manifest ? animGroups() : [])
       for (const fr of state.manifest.groups[g].frames) warningCount += checkFrame(state.manifest, g, fr).length;
+    const sel = state.manifest && selectedBox();
     return {
       mode: state.mode, expression: state.expression, group: state.group, index: state.index,
       playing: state.playing, flipped: state.flipped, zoom: state.zoom, drawn: state.drawn,
       source: img?.source ?? null, ground: img?.ground ?? null,
       warnings: f ? checkFrame(state.manifest, state.group, f) : [], warningCount,
+      selected: sel ? { role: sel.role, path: sel.path.join('.'), shape: structuredClone(sel.shape) } : null,
+      dirty: dirty(), message: state.message,
     };
   },
 };
 
-state.hitboxes = await (await fetch('hitboxes.json', { cache: 'no-store' })).json();
+await loadHitboxes();
 await refresh();
-setInterval(refresh, 1000);
+setInterval(() => {
+  refresh();
+  pollHitboxes();
+}, 1000);
 requestAnimationFrame(loop);

@@ -13,5 +13,6 @@
     "x3_wave": { "type": "rect", "x": -40, "y": -100, "w": 126, "h": 200 },
     "d_storm": { "type": "circle", "cx": 0, "cy": 0, "r": 150 },
     "s_sword": { "type": "rect", "x": -40, "y": -12, "w": 125, "h": 24 }
-  }
+  },
+  "perFrame": {}
 }

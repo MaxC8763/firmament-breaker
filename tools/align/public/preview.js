@@ -31,6 +31,17 @@ export function drawShape(ctx, s, ox, oy, color, style) {
   ctx.setLineDash([]);
 }
 
+/** 選中的框的控制點：白底方塊，固定 8 個螢幕像素大（t＝1 個螢幕像素） */
+export function drawHandles(ctx, points, ox, oy, t) {
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#1d2733';
+  ctx.lineWidth = t;
+  for (const p of points) {
+    ctx.fillRect(ox + p.x - 4 * t, oy + p.y - 4 * t, 8 * t, 8 * t);
+    ctx.strokeRect(ox + p.x - 4 * t, oy + p.y - 4 * t, 8 * t, 8 * t);
+  }
+}
+
 function screen(ctx, scale, sky) {
   const c = ctx.canvas;
   [c.width, c.height] = [SCREEN.w * scale, SCREEN.h * scale];

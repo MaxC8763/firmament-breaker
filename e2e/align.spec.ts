@@ -1,8 +1,8 @@
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import sharp from 'sharp';
-import { ALIGN_TMP, ALIGN_URL, shotPath } from './env';
+import { ALIGN_HITBOXES, ALIGN_TMP, ALIGN_URL, shotPath } from './env';
 
 const EXPORT_DIR = path.join(ALIGN_TMP, 'export');
 const alignState = (page: Page) => page.evaluate(() => (window as any).__align.getState());
@@ -84,4 +84,89 @@ test('手繪往下移了 20 px（2x）：標成手繪、顯示低於地平線 10
   expect(s.warnings).toEqual([{ level: 'warn', text: '腳底低於地平線 10 px' }]);
   await expect(page.locator('summary[data-group="hero/idle"] .count')).toHaveText('手繪 1／4');
   await expect(page.locator('#info .warn')).toContainText('低於地平線 10 px');
+});
+
+test.describe('編輯判定框', () => {
+  // 放大 2× 的畫布比預設視窗寬
+  test.use({ viewport: { width: 1920, height: 1080 } });
+  const ORIGINAL = readFileSync('src/data/hitboxes.json', 'utf8');
+  const saved = () => readFileSync(ALIGN_HITBOXES, 'utf8');
+  const changedLines = (before: string, after: string) => after.split('\n').filter((line, i) => line !== before.split('\n')[i]);
+
+  // 打開 x1 的判定格 x1_01、放大 2×；回傳「1x、相對腳底 (384, 492) 的點 → 螢幕座標」
+  async function openX1(page: Page) {
+    await page.goto(ALIGN_URL);
+    await page.locator('summary[data-group="hero/x1"]').click();
+    await page.keyboard.press('ArrowRight');
+    await drawn(page, 'hero/x1/x1_01');
+    await page.locator('[data-zoom="2"]').click();
+    const box = (await page.locator('#stage').boundingBox())!;
+    return (x: number, y: number) => [box.x + (384 + x) * 2, box.y + (492 + y) * 2] as const;
+  }
+  async function dragRight(page: Page, [x, y]: readonly [number, number], dx: number) {
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx, y, { steps: 4 });
+    await page.mouse.up();
+  }
+
+  test('放大 2× 時拖 x_slash 的右上角往右 40 個螢幕像素：w 從 190 變 210；放棄修改就回到 190', async ({ page }) => {
+    const at = await openX1(page);
+    await page.mouse.click(...at(150, -125));
+    expect((await alignState(page)).selected).toMatchObject({ role: 'attack', path: 'attacks.x_slash' });
+    await dragRight(page, at(210, -250), 40);
+    expect((await alignState(page)).selected.shape).toEqual({ type: 'rect', x: 20, y: -250, w: 210, h: 250 });
+    await expect(page.locator('#fields input[data-field="w"]')).toHaveValue('210');
+    await expect(page.locator('#status')).toHaveText('未儲存');
+
+    await page.locator('#discard').click();
+    await page.waitForFunction(() => !(window as any).__align.getState().dirty);
+    expect((await alignState(page)).selected.shape.w).toBe(190);
+    expect(saved()).toBe(ORIGINAL);
+  });
+
+  test('儲存：暫存檔只有 x_slash 那一行變了、重新打開還在；在工具外改了檔案，工具也會換新', async ({ page }) => {
+    let at = await openX1(page);
+    await page.mouse.click(...at(150, -125));
+    await dragRight(page, at(210, -250), 40);
+    await page.keyboard.press('Control+s');
+    await page.waitForFunction(() => (window as any).__align.getState().message === '已儲存');
+    expect(changedLines(ORIGINAL, saved())).toEqual(['    "x_slash": { "type": "rect", "x": 20, "y": -250, "w": 210, "h": 250 },']);
+
+    at = await openX1(page);
+    await page.mouse.click(...at(150, -125));
+    expect((await alignState(page)).selected.shape.w).toBe(210);
+
+    // 沒有未儲存的修改時每秒重讀
+    writeFileSync(ALIGN_HITBOXES, saved().replace('"w": 210, "h": 250', '"w": 210, "h": 260'));
+    await page.waitForFunction(() => (window as any).__align.getState().selected?.shape.h === 260);
+  });
+
+  test('逐格：x1_01 單獨設定再拖，只影響這一格；改回共用框再存，檔案回到原樣', async ({ page }) => {
+    const before = saved();
+    const shared = JSON.parse(before).attacks.x_slash;
+    const at = await openX1(page);
+    await page.locator('#split').click();
+    expect((await alignState(page)).selected).toMatchObject({ role: 'attack', path: 'perFrame.x1.x1_01' });
+    await dragRight(page, at(shared.x + shared.w, shared.y), -40);
+    await page.keyboard.press('Control+s');
+    await page.waitForFunction(() => (window as any).__align.getState().message === '已儲存');
+    const data = JSON.parse(saved());
+    expect(data.perFrame).toEqual({ x1: { x1_01: { ...shared, w: shared.w - 20 } } });
+    expect(data.attacks.x_slash).toEqual(shared);
+    await expect(page.locator('#list .frames button.own')).toHaveText(['x1_01']);
+
+    await page.keyboard.press('ArrowRight');
+    await drawn(page, 'hero/x1/x1_02');
+    expect((await alignState(page)).selected).toMatchObject({ path: 'attacks.x_slash', shape: shared });
+
+    await page.keyboard.press('ArrowLeft');
+    await drawn(page, 'hero/x1/x1_01');
+    await page.locator('#join').click();
+    await page.keyboard.press('Control+s');
+    await page.waitForFunction(() => (window as any).__align.getState().message === '已儲存');
+    expect(JSON.parse(saved()).perFrame).toEqual({});
+    expect(saved()).toBe(before);
+    await expect(page.locator('#list .frames button.own')).toHaveCount(0);
+  });
 });

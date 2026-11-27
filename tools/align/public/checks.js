@@ -12,5 +12,15 @@ export function checkFrame(manifest, group, frame) {
   return out;
 }
 
+/** body 的下緣要在腳底（y＋h＝0）：遊戲裡 body 踩在地上，下緣偏了，主角就會陷進地面或浮空；沒問題是 null */
+export function bodyWarning(hb) {
+  const b = hb?.body;
+  const bottom = b ? b.y + b.h : 0;
+  if (bottom === 0) return null;
+  return bottom < 0
+    ? `body 下緣在腳底上方 ${-bottom} px：主角在遊戲裡會陷進地面`
+    : `body 下緣在腳底下方 ${bottom} px：主角在遊戲裡會浮空`;
+}
+
 /** 一組警告裡最嚴重的等級（給清單上色）；沒有警告是 null */
 export const worst = (list) => (list.some((w) => w.level !== 'warn') ? 'bad' : list.length ? 'warn' : null);
