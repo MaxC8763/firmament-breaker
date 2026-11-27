@@ -4,6 +4,10 @@ export interface ArtFrame {
   file: string;
   /** 這張停幾格（以 fps 計） */
   hold: number;
+  /** 出招的哪一段；只有 active 的格有攻擊判定 */
+  phase?: 'startup' | 'active' | 'recovery';
+  /** 依垂直速度選格的動作（跳躍）裡，這格的用途 */
+  role?: 'takeoff' | 'rise' | 'apex' | 'fall' | 'land';
 }
 
 export interface ArtGroup {

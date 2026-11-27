@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import type { Manifest } from '../data/manifest';
 
-// 載入美術管線產出的 atlas 與 manifest，替每個主角動作建好動畫
+// 載入美術管線產出的 atlas 與 manifest，替每個有格的資料夾建好動畫
 export class Boot extends Phaser.Scene {
   constructor() {
     super('Boot');
@@ -17,7 +17,7 @@ export class Boot extends Phaser.Scene {
   create() {
     const manifest: Manifest = this.cache.json.get('manifest');
     for (const [group, meta] of Object.entries(manifest.groups)) {
-      if (!group.startsWith('hero/') || !meta.frames) continue;
+      if (!meta.frames) continue;
       this.anims.create({
         key: group,
         // 每格停 hold 格；v4 的每格 duration 是取代 frameRate 算出的時間，不是加上去

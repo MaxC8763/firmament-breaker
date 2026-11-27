@@ -1,0 +1,25 @@
+{
+  "canvas": [
+    256,
+    256
+  ],
+  "pivot": [
+    128,
+    236
+  ],
+  "scale": 2,
+  "fps": 12,
+  "loop": true,
+  "frames": [
+    {
+      "file": "idle_00",
+      "hold": 6,
+      "grounded": true
+    },
+    {
+      "file": "idle_01",
+      "hold": 6,
+      "grounded": true
+    }
+  ]
+}

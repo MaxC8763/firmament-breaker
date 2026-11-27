@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * 主角佔位圖產生器
+ * 佔位圖產生器（主角與雜兵）
  *
- * 用程式畫出 Q 版人類劍士的動作、特效、立繪、cut-in 與地圖圖示，手繪圖還沒畫好之前，遊戲照樣能開發與測試。
+ * 用程式畫出 Q 版人類劍士的動作、特效、立繪、cut-in 與地圖圖示，以及雜兵的動作，手繪圖還沒畫好之前，遊戲照樣能開發與測試。
  * 手繪圖以「同路徑、同檔名」的 2x PNG 放進 art/export/，美術管線就會逐張改用手繪。
  *
  * 用法：
@@ -12,6 +12,7 @@
  *
  * 規則：
  * - 主角動作畫布 1x 768×512、腳底 pivot (384, 492)；輸出 2x（1536×1024）。只畫面向右。
+ * - 雜兵 A 小兵（enemies/grunt/）畫布 1x 256×256、腳底 pivot (128, 236)，同樣黑描邊平塗、只畫面向右。
  * - grounded 的格自動貼地：最下緣不透明像素（alpha ≥ 128）剛好碰到地平線。
  * - 每個資料夾一份 meta.json；hold＝這張停幾格（12 fps），phase＝startup／active／recovery。
  * - 輸出是產生物，不要手改；要改姿勢就改下面的 ACTIONS 再重跑。
@@ -369,6 +370,66 @@ const ACTIONS = {
   ]),
 };
 
+// ---------------- 雜兵 A 小兵（側面、面向右；座標原點＝腳底 pivot，+x 前方、+y 向下） ----------------
+const GRUNT = { w: 256, h: 256, px: 128, py: 236 };
+const GRUNT_COL = { body: '#e9915f', belly: '#f7c9a4', horn: '#fff1d6' };
+
+/** lean＝身體前後傾（度，負＝往後仰）；squash＝上下壓扁；feet＝兩腳前後位移；eyes＝open／hurt／dead */
+function gruntSVG({ lean = 0, squash = 1, feet = [0, 0], eyes = 'open' }) {
+  const h = 58 * squash, by = -12 - h;
+  const body = [
+    ellipse([-24 + feet[0], -10], 20, 10),
+    ellipse([24 + feet[1], -10], 20, 10),
+    ellipse([0, by], 66, h),
+  ];
+  const horn = [shape(poly([[-16, by - h + 8], [-2, by - h - 26], [12, by - h + 6]], true))];
+  const ex = 30, ey = by - h * 0.25, k = squash;
+  const stroke = (d) => `<path d="${d}" fill="none" stroke="${COL.line}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
+  let face;
+  if (eyes === 'open') {
+    face = [ex, ex + 24].map((x) =>
+      `<ellipse cx="${x}" cy="${n(ey)}" rx="8" ry="${n(11 * k)}" fill="#ffffff" stroke="${COL.line}" stroke-width="3"/>` +
+      `<circle cx="${x + 3}" cy="${n(ey + 2 * k)}" r="4.5" fill="${COL.line}"/>`).join('') +
+      stroke(poly([[ex - 9, ey - 16 * k], [ex + 8, ey - 11 * k]])) + stroke(poly([[ex + 16, ey - 11 * k], [ex + 33, ey - 16 * k]]));
+  } else if (eyes === 'hurt') {
+    face = stroke(poly([[ex - 7, ey - 8], [ex + 5, ey], [ex - 7, ey + 8]])) + stroke(poly([[ex + 31, ey - 8], [ex + 19, ey], [ex + 31, ey + 8]]));
+  } else {
+    face = [ex, ex + 24].map((x) => stroke(`M ${x - 6},${n(ey - 6 * k)} L ${x + 6},${n(ey + 6 * k)} M ${x + 6},${n(ey - 6 * k)} L ${x - 6},${n(ey + 6 * k)}`)).join('');
+  }
+  const mouth = stroke(poly([[ex + 2, by + h * 0.25], [ex + 22, by + h * 0.25]]));
+  const belly = `<ellipse cx="14" cy="${n(by + h * 0.35)}" rx="34" ry="${n(h * 0.45)}" fill="${GRUNT_COL.belly}"/>`;
+  return {
+    lean,
+    inner: group(horn, OUTLINE, GRUNT_COL.horn) + group(body, OUTLINE, GRUNT_COL.body) + belly + face + mouth,
+  };
+}
+
+const gruntDoc = ({ lean, inner }, oy) =>
+  svgDoc(GRUNT.w, GRUNT.h, `<g transform="translate(${GRUNT.px} ${n(GRUNT.py + oy)}) rotate(${n(lean)} 0 -10)">${inner}</g>`);
+
+/** 貼地：和主角一樣，最下緣不透明像素剛好碰到地平線 */
+async function renderGruntFrame(pose, label) {
+  const g = gruntSVG(pose);
+  const groundRow = GRUNT.py * SCALE - 1;
+  let oy = 0;
+  for (let i = 0; i < 5; i++) {
+    const low = await lowestOpaqueRow(gruntDoc(g, oy));
+    if (low < 0 || low === groundRow) break;
+    oy += (groundRow - low) / SCALE;
+  }
+  const doc = gruntDoc(g, oy);
+  const low = await lowestOpaqueRow(doc);
+  if (low !== groundRow) console.warn(`⚠ ${label}：最下緣在第 ${low} 列（應為 ${groundRow}）`);
+  return toPng(doc);
+}
+
+const GRUNT_ACTIONS = {
+  idle: A([F(6), F(6, { squash: 0.95 })], { loop: true }),
+  move: A([F(2, { feet: [8, -8], lean: 4 }), F(2, { squash: 0.96 }), F(2, { feet: [-8, 8], lean: 4 }), F(2, { squash: 0.96 })], { loop: true }),
+  hurt: A([F(2, { lean: -14, eyes: 'hurt' }), F(2, { lean: -7, eyes: 'hurt' })]),
+  death: A([F(2, { lean: -14, eyes: 'hurt' }), F(2, { squash: 0.7, eyes: 'dead' }), F(4, { squash: 0.4, eyes: 'dead' })]),
+};
+
 // ---------------- 特效（各自的畫布與 pivot） ----------------
 function waveSVG(k) {
   const W = 256, cy = 128, ox = 112 + k * 4, or = 100 + k * 3, ix = 84 - k * 3, ir = 98;
@@ -503,6 +564,18 @@ async function main() {
     await putJson(`hero/${name}/meta.json`, {
       canvas: [HERO.w, HERO.h], pivot: [HERO.px, HERO.py], scale: SCALE, fps: FPS, loop: !!act.loop,
       ...(act.select ? { select: act.select } : {}), frames,
+    });
+  }
+
+  for (const [name, act] of Object.entries(GRUNT_ACTIONS)) {
+    const frames = [];
+    for (const [i, fr] of act.frames.entries()) {
+      const file = `${name}_${id2(i)}`;
+      await put(`enemies/grunt/${name}/${file}.png`, await renderGruntFrame(fr.pose, `grunt/${file}`));
+      frames.push({ file, hold: fr.hold, grounded: true });
+    }
+    await putJson(`enemies/grunt/${name}/meta.json`, {
+      canvas: [GRUNT.w, GRUNT.h], pivot: [GRUNT.px, GRUNT.py], scale: SCALE, fps: FPS, loop: !!act.loop, frames,
     });
   }
 

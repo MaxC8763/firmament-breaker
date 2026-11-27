@@ -1,0 +1,35 @@
+{
+  "canvas": [
+    256,
+    256
+  ],
+  "pivot": [
+    128,
+    236
+  ],
+  "scale": 2,
+  "fps": 12,
+  "loop": true,
+  "frames": [
+    {
+      "file": "move_00",
+      "hold": 2,
+      "grounded": true
+    },
+    {
+      "file": "move_01",
+      "hold": 2,
+      "grounded": true
+    },
+    {
+      "file": "move_02",
+      "hold": 2,
+      "grounded": true
+    },
+    {
+      "file": "move_03",
+      "hold": 2,
+      "grounded": true
+    }
+  ]
+}

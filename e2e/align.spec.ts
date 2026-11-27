@@ -11,9 +11,10 @@ const drawn = (page: Page, key: string) =>
 
 test.describe.configure({ mode: 'serial', timeout: 60_000 });
 
-// 上一次測試中斷時可能留下暫存的手繪
-test.beforeAll(() => rmSync(EXPORT_DIR, { recursive: true, force: true }));
-test.afterAll(() => rmSync(EXPORT_DIR, { recursive: true, force: true }));
+// 上一次測試中斷時可能留下暫存的手繪。Windows 上監看程式可能還沒放開資料夾（EPERM），刪除時重試幾次
+const clean = () => rmSync(EXPORT_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+test.beforeAll(clean);
+test.afterAll(clean);
 
 test('動作清單、選格、逐格、播放、翻面', async ({ page }) => {
   await page.goto(ALIGN_URL);
