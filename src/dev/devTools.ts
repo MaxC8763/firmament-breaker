@@ -2,9 +2,9 @@ import Phaser from 'phaser';
 import type { AttackInstance, HitResult } from '../combat/attack';
 import type { Box } from '../combat/hitbox';
 import type { Manifest } from '../data/manifest';
-import { GROUND_Y, HERO } from '../data/tuning';
+import { GROUND_Y, HERO, TICK_HZ } from '../data/tuning';
 import type { Enemy } from '../entities/Enemy';
-import { EnemyState, hurtEnemy } from '../entities/enemyLogic';
+import { EnemyState, hurtEnemy, swingActive } from '../entities/enemyLogic';
 import { heroView, HeroState } from '../entities/heroLogic';
 import { HIT_EVENT, onKey, type Stage } from '../scenes/Stage';
 
@@ -34,7 +34,7 @@ export interface GameState {
     /** 作弊鍵 3 的無敵 */
     invincible: boolean;
   };
-  enemies: { kind: string; x: number; y: number; state: string; facing: number; hp: number }[];
+  enemies: { kind: string; x: number; y: number; state: string; facing: number; hp: number; armor: { left: number; max: number; broken: number } }[];
   /** 地圖上還沒被吃掉的道具 */
   items: { kind: string; x: number; y: number }[];
   /** 這張地圖打中敵人回了多少 MP（不含自然回復與道具；超過上限捨去的也算） */
@@ -87,8 +87,10 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
   const boxes = scene.add.graphics().setDepth(1000);
   const world = scene.physics.world;
   world.createDebugGraphic();
+  const armorTexts = new Map<Enemy, Phaser.GameObjects.Text>();
   const draw = () => {
     boxes.clear().setVisible(shown);
+    for (const t of armorTexts.values()) t.setVisible(shown);
     world.debugGraphic.setVisible(shown);
     world.drawDebug = shown;
     if (!shown) return;
@@ -102,6 +104,16 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
     if (attack) rect(attack, COLOR.attack, true);
     for (const w of scene.waves) rect(scene.waveBox(w), COLOR.wave, true);
     for (const b of scene.bullets) rect(scene.bulletBox(b.p), COLOR.enemyAttack, true);
+    for (const e of scene.enemies) if (swingActive(e.logic)) rect(e.attackBox()!, COLOR.enemyAttack, true);
+    // 有霸體的雜兵頭上顯示「霸體 n／段數」，破甲時顯示剩幾秒
+    for (const [e, t] of armorTexts) if (!scene.enemies.includes(e)) (t.destroy(), armorTexts.delete(e));
+    for (const e of scene.enemies) {
+      const a = e.logic.armor;
+      if (a.max === 0) continue;
+      let t = armorTexts.get(e);
+      if (!t) armorTexts.set(e, (t = scene.add.text(0, 0, '', { fontFamily: 'sans-serif', fontSize: '26px', color: '#ffffff', stroke: '#1b1b1b', strokeThickness: 5 }).setOrigin(0.5).setDepth(1001)));
+      t.setPosition(e.x, e.y - 250).setText(a.broken > 0 ? `破甲 ${(a.broken / TICK_HZ).toFixed(1)} 秒` : `霸體 ${a.left}／${a.max}`);
+    }
     boxes.lineStyle(2, COLOR.cross);
     boxes.lineBetween(hero.x - 14, hero.y, hero.x + 14, hero.y);
     boxes.lineBetween(hero.x, hero.y - 14, hero.x, hero.y + 14);
@@ -164,7 +176,15 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
           mp: hero.logic.mp,
           invincible: hero.logic.invincible,
         },
-        enemies: scene.enemies.map((e) => ({ kind: e.logic.kind, x: e.x, y: e.y, state: EnemyState[e.logic.state], facing: e.logic.facing, hp: e.logic.hp })),
+        enemies: scene.enemies.map((e) => ({
+          kind: e.logic.kind,
+          x: e.x,
+          y: e.y,
+          state: EnemyState[e.logic.state],
+          facing: e.logic.facing,
+          hp: e.logic.hp,
+          armor: { ...e.logic.armor },
+        })),
         items: scene.items.map((i) => ({ kind: i.kind, x: i.sprite.x, y: i.sprite.y })),
         mpFromHits,
         bullets: scene.bullets.map((b) => ({ x: b.p.x, y: b.p.y })),

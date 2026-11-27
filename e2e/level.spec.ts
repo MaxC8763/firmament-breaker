@@ -199,3 +199,38 @@ test('砲手的彈丸打中主角 HP −60；用 X 砍掉彈丸，命中回復�
   expect(after.hp).toBe(before.hero.hp);
   expect(after.mpFromHits).toBe(before.mpFromHits);
 });
+
+test('重甲兵吃 7 段不硬直、第 8 段破甲並硬直', async ({ page }) => {
+  // 第 3 張右端有一隻重甲兵：開無敵，在網頁裡每幀驅動——主角待機時站回它左邊 200 px、出 XXX，破甲那一幀就定格
+  await game(page, 'enter(2, 1000, 0)');
+  await until(page, 's.map === 2');
+  await pressOnce(page, '3', 's.hero.invincible');
+  await watch(page, `
+    const h = s.enemies.find((e) => e.kind === 'heavy');
+    if (!h || r.broke) return;
+    r.max = h.armor.max;
+    if (h.armor.broken === 0 && h.state === 'Hurt') r.staggeredWhileArmored = true;
+    if (h.armor.broken > 0) {
+      r.broke = { state: h.state, hp: h.hp };
+      window.__game.pause();
+      return;
+    }
+    const move = s.hero.move ?? 'none';
+    if (move === 'none' && s.hero.state === 'Idle' && r.last !== 'placed') {
+      window.__game.placeHero(h.x - 200);
+      r.last = 'placed';
+    } else if (move !== r.last && move !== 'x3') {
+      for (const type of ['keydown', 'keyup']) window.dispatchEvent(new KeyboardEvent(type, { key: 'x', code: 'KeyX', keyCode: 88 }));
+      r.last = move;
+    }
+  `);
+  await untilRec(page, 'r.broke');
+  // 定格在破甲那一幀：碎片飛散，頭上顯示破甲剩幾秒
+  await until(page, 's.paused');
+  await page.screenshot({ path: shotPath('level-heavy-break') });
+  await resumeGame(page);
+  const r = await rec(page);
+  expect(r.max).toBe(8);
+  expect(r.staggeredWhileArmored).toBeUndefined();
+  expect(r.broke.state).toBe('Hurt');
+});

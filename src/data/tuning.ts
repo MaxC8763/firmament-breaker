@@ -99,12 +99,14 @@ export const ENEMY = {
   contactDamage: 50,
 };
 
-/** 各種雜兵的數值；chaseRange＝主角在水平這個距離內就追 */
+/** 各種雜兵的數值；chaseRange＝主角在水平這個距離內就追；armorHits＝霸體段數（0＝沒有霸體）、breakMs＝破甲多久 */
 export const ENEMIES = {
   /** A 小兵 */
-  grunt: { hp: 120, speed: 120, chaseRange: 600 },
+  grunt: { hp: 120, speed: 120, chaseRange: 600, armorHits: 0, breakMs: 0 },
   /** B 砲手：不動；主角在水平 range 內，每 intervalMs 朝主角那側水平射一發，彈丸從腳底前方 muzzleX、上方 muzzleY 出來 */
-  gunner: { hp: 120, range: 900, intervalMs: 2000, bulletSpeed: 500, bulletDamage: 60, muzzleX: 90, muzzleY: 110 },
+  gunner: { hp: 120, armorHits: 0, breakMs: 0, range: 900, intervalMs: 2000, bulletSpeed: 500, bulletDamage: 60, muzzleX: 90, muzzleY: 110 },
+  /** C 重甲兵：主角在揮擊範圍內、距上次揮擊滿 swingEveryMs 才揮；揮擊的預備、判定、收招照 attack 動作的格 */
+  heavy: { hp: 360, speed: 60, chaseRange: 600, armorHits: 8, breakMs: 2500, swingEveryMs: 3000, swingDamage: 120 },
 };
 
 export type EnemyKind = keyof typeof ENEMIES;

@@ -1,4 +1,5 @@
 // 三種雜兵的決策：不 import phaser；數值依種類從 tuning 來，薄殼只負責套用結果
+import { armorDamage, armored, newArmor, tickArmor, type Armor } from '../combat/armor';
 import { canDie, newTarget, type Target } from '../combat/attack';
 import type { ArtFrame, ArtGroup } from '../data/manifest';
 import { ENEMIES, ENEMY, TICK_HZ, ticks, type EnemyKind } from '../data/tuning';
@@ -7,7 +8,7 @@ import { frameAt } from './heroLogic';
 export enum EnemyState {
   Idle,
   Walk,
-  /** 出招中（砲手的射擊）：格照攻擊動作 meta 的 hold／phase 推進 */
+  /** 出招中（砲手的射擊、重甲兵的揮擊）：格照攻擊動作 meta 的 hold／phase 推進 */
   Attack,
   /** 受擊硬直，往後退 */
   Hurt,
@@ -36,8 +37,12 @@ export interface EnemyLogic extends Target {
   attack?: ArtGroup;
   /** 出招後經過的 tick */
   attackT: number;
-  /** 砲手：主角在射程內經過的 tick，滿了就射 */
+  /** 砲手：主角在射程內經過的 tick，滿了就射；重甲兵：還要幾個 tick 才能再揮 */
   timer: number;
+  /** 霸體；armorHits 是 0 的雜兵沒有霸體 */
+  armor: Armor;
+  /** 這次揮擊打中主角了沒：一次揮擊只打中一次 */
+  swingHit: boolean;
 }
 
 /** 一個 tick 的結果：水平速度；shoot＝砲手這個 tick 到了發射格，該生成彈丸 */
@@ -58,28 +63,43 @@ export const newEnemy = (kind: EnemyKind, x: number, deathTicks: number, attack?
   attack,
   attackT: 0,
   timer: 0,
+  armor: newArmor(ENEMIES[kind].armorHits),
+  swingHit: false,
 });
 
 /** 擊退速度：硬直期間等速退完擊退距離 */
 const KNOCK_SPEED = ENEMY.knockback / (ENEMY.hurtMs / 1000);
 
-/** 被打中（造成傷害或命中不計段）：硬直、往 dir 擊退，正在做的攻擊中斷、砲手的計時重來；HP 已歸零就進入待死亡 */
-export function hurtEnemy(e: EnemyLogic, dir: number): void {
+/**
+ * 被打中（damaged＝這一段有造成傷害；命中但不計段是 false）：硬直、往 dir 擊退，正在做的攻擊中斷、砲手的計時重來；
+ * HP 已歸零就進入待死亡。霸體中只扣血：不硬直、不被擊退、出招照常；造成傷害的段才計入霸體段數，打破霸體的那一擊照正常受擊
+ */
+export function hurtEnemy(e: EnemyLogic, dir: number, damaged = true): void {
   if (e.state === EnemyState.Death || e.state === EnemyState.Gone) return;
+  if (!e.dying) {
+    if (damaged) armorDamage(e.armor, ticks(ENEMIES[e.kind].breakMs));
+    if (armored(e.armor)) return;
+  }
   e.state = e.dying ? EnemyState.Dying : EnemyState.Hurt;
   e.ticks = ticks(ENEMY.hurtMs);
   e.knockDir = dir;
   e.timer = 0;
 }
 
-/** 硬直中與待死亡的雜兵不造成碰撞傷害 */
+/** 硬直中與待死亡的雜兵不造成碰撞傷害；霸體中被打不會硬直，所以照樣有碰撞傷害 */
 export const enemyHarmful = (e: EnemyLogic) => e.state === EnemyState.Idle || e.state === EnemyState.Walk || e.state === EnemyState.Attack;
 
 /** 出招中顯示哪一格；不在出招是 undefined */
 export const attackFrame = (e: EnemyLogic): ArtFrame | undefined =>
   e.state === EnemyState.Attack && e.attack ? frameAt(e.attack, e.attackT) : undefined;
 
-export function tickEnemy(e: EnemyLogic, heroX: number): EnemyOutput {
+/** 重甲兵揮擊的判定格 */
+export const swingActive = (e: EnemyLogic) => e.kind === 'heavy' && attackFrame(e)?.phase === 'active';
+
+/** heroInReach＝主角在揮擊範圍內（重甲兵的揮擊框碰到主角的 hurtbox），由場景算好傳進來 */
+export function tickEnemy(e: EnemyLogic, heroX: number, heroInReach = false): EnemyOutput {
+  tickArmor(e.armor);
+  if (e.kind === 'heavy' && e.timer > 0) e.timer--;
   switch (e.state) {
     case EnemyState.Hurt:
       if (--e.ticks <= 0) e.state = EnemyState.Idle;
@@ -100,9 +120,27 @@ export function tickEnemy(e: EnemyLogic, heroX: number): EnemyOutput {
       return attacking(e);
   }
   const dx = heroX - e.x;
-  if (e.kind === 'gunner') return gunner(e, dx);
-  const { chaseRange, speed } = ENEMIES.grunt;
-  return chase(e, dx, chaseRange, speed);
+  switch (e.kind) {
+    case 'gunner':
+      return gunner(e, dx);
+    case 'heavy':
+      return heavy(e, dx, heroInReach);
+    default:
+      return chase(e, dx, ENEMIES.grunt.chaseRange, ENEMIES.grunt.speed);
+  }
+}
+
+/** 重甲兵：朝主角走；主角在揮擊範圍內、距上次揮擊滿 swingEveryMs 就揮 */
+function heavy(e: EnemyLogic, dx: number, heroInReach: boolean): EnemyOutput {
+  if (heroInReach && e.timer === 0) {
+    if (dx) e.facing = dx > 0 ? 1 : -1;
+    e.state = EnemyState.Attack;
+    e.attackT = 0;
+    e.timer = ticks(ENEMIES.heavy.swingEveryMs);
+    e.swingHit = false;
+    return { vx: 0 };
+  }
+  return chase(e, dx, ENEMIES.heavy.chaseRange, ENEMIES.heavy.speed);
 }
 
 /** 主角在水平 range 內就以 speed 朝主角走 */
@@ -128,7 +166,7 @@ function gunner(e: EnemyLogic, dx: number): EnemyOutput {
 /** 出招中：照攻擊動作的格推進，出招期間不動；播完回到待機。砲手的計時在出招中照樣算，兩發之間剛好 intervalMs */
 function attacking(e: EnemyLogic): EnemyOutput {
   e.attackT++;
-  e.timer++;
+  if (e.kind === 'gunner') e.timer++;
   const frame = attackFrame(e);
   if (!frame) {
     e.state = EnemyState.Idle;

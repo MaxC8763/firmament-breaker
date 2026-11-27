@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { armored } from '../combat/armor';
 import { toWorld } from '../combat/hitbox';
 import hitboxes from '../data/hitboxes.json';
 import type { Manifest } from '../data/manifest';
@@ -22,6 +23,8 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
   readonly logic: EnemyLogic;
   /** 閃白還剩幾個 tick */
   private flashTicks = 0;
+  /** 上一幀有沒有霸體：變了就播破甲或回復的特效 */
+  private wasArmored: boolean;
 
   constructor(scene: Phaser.Scene, manifest: Manifest, kind: EnemyKind, x: number) {
     const idle = manifest.groups[`enemies/${kind}/idle`];
@@ -38,12 +41,13 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     this.body.setSize(box.w, box.h, false).setOffset(px + box.x, py + box.y);
     this.body.setCollideWorldBounds(true);
     this.body.setGravityY(GRAVITY);
+    this.wasArmored = armored(this.logic.armor);
   }
 
-  /** 跑一個邏輯 tick，把速度交給物理；回傳邏輯的結果，讓場景生成彈丸 */
-  step(heroX: number) {
+  /** 跑一個邏輯 tick，把速度交給物理；回傳邏輯的結果，讓場景生成彈丸。heroInReach＝主角在揮擊範圍內 */
+  step(heroX: number, heroInReach: boolean) {
     this.logic.x = this.x;
-    const out = tickEnemy(this.logic, heroX);
+    const out = tickEnemy(this.logic, heroX, heroInReach);
     this.body.setVelocityX(out.vx);
     if (this.flashTicks > 0) this.flashTicks--;
     return out;
@@ -54,11 +58,20 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     return toWorld(hitboxes.enemies[this.logic.kind].hurtbox, this.x, this.y, this.logic.facing);
   }
 
+  /** 重甲兵揮擊的範圍（世界座標）：身體前緣往前；其他雜兵是 null */
+  attackBox() {
+    return this.logic.kind === 'heavy' ? toWorld(hitboxes.enemies.heavy.attack, this.x, this.y, this.logic.facing) : null;
+  }
+
   flash() {
     this.flashTicks = ticks(ENEMY.flashMs);
   }
 
   show() {
+    // 霸體變了：破甲播碎片往外飛，回復播一圈光環（程式畫）
+    const now = armored(this.logic.armor);
+    if (now !== this.wasArmored) this.burst(now);
+    this.wasArmored = now;
     this.setFlipX(this.logic.facing < 0);
     // 出招的格由邏輯指定，其他動作循環播放
     const key = `enemies/${this.logic.kind}/${ACTION[this.logic.state]}`;
@@ -69,5 +82,19 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     } else this.play(key, true);
     if (this.flashTicks > 0) this.setTint(0xffffff).setTintMode(Phaser.TintModes.FILL);
     else this.clearTint();
+  }
+
+  /** 破甲（recover＝false）：灰色碎片往外飛散；回復（true）：金色光環擴散 */
+  private burst(recover: boolean) {
+    const g = this.scene.add.graphics({ x: this.x, y: this.y - 110 }).setDepth(this.depth + 1);
+    if (recover) g.lineStyle(10, 0xffd84d, 0.9).strokeCircle(0, 0, 90);
+    else
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        g.fillStyle(0xcfd3db).lineStyle(3, 0x1b1b1b);
+        const [x, y] = [Math.cos(a) * 70, Math.sin(a) * 70];
+        g.fillTriangle(x, y - 14, x + 12, y + 10, x - 12, y + 10).strokeTriangle(x, y - 14, x + 12, y + 10, x - 12, y + 10);
+      }
+    this.scene.tweens.add({ targets: g, scale: recover ? 1.6 : 2.2, alpha: 0, duration: 450, onComplete: () => g.destroy() });
   }
 }

@@ -8,7 +8,7 @@ import { DOOR, doorOpen, LEVEL_START, MAPS, nextEntry, PLATFORM_THICKNESS, type 
 import { ENEMIES, ENEMY, GROUND_Y, HERO, SLASH, TICK_HZ, WAVE, WORLD_WIDTH, ticks } from '../data/tuning';
 import { installDevTools } from '../dev/devTools';
 import { Enemy } from '../entities/Enemy';
-import { enemyHarmful, EnemyState, hurtEnemy } from '../entities/enemyLogic';
+import { enemyHarmful, EnemyState, hurtEnemy, swingActive } from '../entities/enemyLogic';
 import { Hero } from '../entities/Hero';
 import { activeFrame, eatItem, HeroState, hurtHero, type Attack } from '../entities/heroLogic';
 import { noButtons, type Button, type InputFrame } from '../input/input';
@@ -224,7 +224,11 @@ export class Stage extends Phaser.Scene {
   private tick(frame: InputFrame) {
     const out = this.hero.step(frame);
     if (out.dropThrough) this.dropY = this.hero.body.bottom;
-    const shooters = this.enemies.filter((e) => e.step(this.hero.x).shoot);
+    const heroBox = this.heroHurtbox();
+    const shooters = this.enemies.filter((e) => {
+      const reach = e.attackBox();
+      return e.step(this.hero.x, reach !== null && overlaps(reach, heroBox)).shoot;
+    });
     this.physics.world.singleStep();
     // 腳底掉過平台的下緣，那個平台的上緣已經離得夠遠，物理不會再把主角推回上面
     if (this.dropY !== null && this.hero.body.bottom > this.dropY + PLATFORM_THICKNESS) this.dropY = null;
@@ -234,6 +238,7 @@ export class Stage extends Phaser.Scene {
     this.resolveHits();
     this.moveBullets();
     this.contactDamage();
+    this.swingHits();
     this.pickItems();
     for (const e of this.enemies) if (e.logic.state === EnemyState.Gone) e.destroy();
     this.enemies = this.enemies.filter((e) => e.logic.state !== EnemyState.Gone);
@@ -294,6 +299,16 @@ export class Stage extends Phaser.Scene {
       sprite.destroy();
       return false;
     });
+  }
+
+  /** 重甲兵揮擊的判定格碰到主角：一次揮擊只打中一次（主角無敵就不算打中） */
+  private swingHits() {
+    const hero = this.hero;
+    const box = this.heroHurtbox();
+    for (const e of this.enemies) {
+      if (!swingActive(e.logic) || e.logic.swingHit || !overlaps(e.attackBox()!, box)) continue;
+      e.logic.swingHit = hurtHero(hero.logic, ENEMIES.heavy.swingDamage, e.logic.facing);
+    }
   }
 
   /** 雜兵碰到主角的 hurtbox 就造成傷害；硬直中、待死亡的不算 */
@@ -367,7 +382,7 @@ export class Stage extends Phaser.Scene {
       const { result, mp } = strike(attack, e.logic, this.hero.logic.tick);
       if (result === 'none') continue;
       this.hero.logic.mp = addMp(this.hero.logic.mp, mp);
-      hurtEnemy(e.logic, dir);
+      hurtEnemy(e.logic, dir, result === 'damage');
       e.flash();
       if (single && result === 'damage') this.hitstop = ticks(SLASH.hitstopMs);
       this.events.emit(HIT_EVENT, e, result satisfies HitResult, result === 'damage' ? attack.spec.damage : 0, attack);

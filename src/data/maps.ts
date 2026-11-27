@@ -81,6 +81,7 @@ export const MAPS: MapData[] = [
       { kind: 'grunt', x: 1400 },
       { kind: 'grunt', x: 2200 },
       { kind: 'gunner', x: 2700 },
+      { kind: 'heavy', x: 3300 },
     ],
     items: [
       { kind: 'hp', x: 1200, y: HIGH },
