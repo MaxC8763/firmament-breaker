@@ -18,6 +18,8 @@ export enum HeroState {
   Run,
   Air,
   Attack,
+  /** 停止奔跑後的滑行 */
+  Slide,
   /** 受擊硬直，往後退 */
   Hurt,
   /** HP 歸零，播完死亡動畫就要求重來 */
@@ -37,8 +39,6 @@ export interface Attack {
   t: number;
   /** 已經按了 X，判定結束就接下一招 */
   queued: boolean;
-  /** 跑＋X 的滑行初速，slideMs 內減到 0 */
-  slide: number;
   /** 空中出招、收招中落地：剩下的收招在地面繼續，顯示落地格 */
   landed: boolean;
 }
@@ -74,6 +74,10 @@ export interface HeroLogic {
   attack: Attack | null;
   /** 這次離地用過空中 X 了沒（停在 X1、X2、X3 都算一輪） */
   airAttackUsed: boolean;
+  /** 地面滑行（停止奔跑、跑＋X）目前的速度，沿著面向；出招中照樣滑，滑完才停 */
+  slideV: number;
+  /** 滑行每個 tick 減掉多少速度（按著反方向時再乘 brakeTurnFactor） */
+  slideDecel: number;
   hp: number;
   mp: number;
   /** 目前狀態經過的 tick（受擊、死亡） */
@@ -164,6 +168,8 @@ export const newHero = (moves: HeroMoves): HeroLogic => ({
   landTicks: 0,
   attack: null,
   airAttackUsed: false,
+  slideV: 0,
+  slideDecel: 0,
   hp: HERO.hpMax,
   mp: 0,
   stateTicks: 0,
@@ -181,6 +187,7 @@ export function hurtHero(h: HeroLogic, damage: number, dir: number): boolean {
   if (h.invincible || h.invulnTicks > 0 || h.state === HeroState.Dead) return false;
   h.hp = Math.max(0, h.hp - damage);
   h.attack = null;
+  h.slideV = 0;
   h.stateTicks = 0;
   h.knockDir = dir;
   h.state = h.hp === 0 ? HeroState.Dead : HeroState.Hurt;
@@ -196,6 +203,8 @@ export function tickHero(h: HeroLogic, input: HeroInput): HeroOutput {
   h.vy = input.vy;
   const dir = direction(f);
   if (h.invulnTicks > 0) h.invulnTicks--;
+  // 地面滑行每個 tick 減速；按著反方向減速更快
+  if (h.slideV > 0) h.slideV = Math.max(0, h.slideV - h.slideDecel * (dir === -h.facing ? HERO.brakeTurnFactor : 1));
 
   switch (h.state) {
     case HeroState.Dead:
@@ -224,10 +233,25 @@ export function tickHero(h: HeroLogic, input: HeroInput): HeroOutput {
   }
 
   if (h.landTicks > 0) h.landTicks--;
-  if (takeBuffered(h.buffer, 'attack', t)) return startAttack(h, 'x1', false, h.state === HeroState.Run ? HERO.runSpeed : 0);
+  if (takeBuffered(h.buffer, 'attack', t)) {
+    // 跑＋X：從跑速滑行 slideMs；滑行中出招：剩下的滑行照原本的減速繼續
+    if (h.state === HeroState.Run) slide(h, HERO.slideMs);
+    return startAttack(h, 'x1', false);
+  }
   if (takeBuffered(h.buffer, 'jump', t)) {
     takeoff(h, dir);
     return air(h, f, dir, JUMP_SPEED);
+  }
+  if (h.state === HeroState.Slide) {
+    // 往同方向按就不滑了，照一般的走跑；滑完了也一樣
+    if (dir === h.facing || h.slideV === 0) h.slideV = 0;
+    else return { vx: h.facing * h.slideV, vy: null, gravity: true };
+  }
+  // 停止奔跑：放開跑的方向（或兩個方向一起按）就滑行一小段
+  if (h.state === HeroState.Run && !(dir && h.run.runDir === dir)) {
+    h.state = HeroState.Slide;
+    slide(h, HERO.brakeMs);
+    return { vx: h.facing * h.slideV, vy: null, gravity: true };
   }
   if (dir) h.facing = dir > 0 ? 1 : -1;
   h.state = !dir ? HeroState.Idle : h.run.runDir === dir ? HeroState.Run : HeroState.Walk;
@@ -236,11 +260,17 @@ export function tickHero(h: HeroLogic, input: HeroInput): HeroOutput {
   return { vx: dir * speed, vy: null, gravity: true };
 }
 
-/** 出招：面向鎖定、不能左右移動；空中招在預備＋判定期間滯空 */
-function startAttack(h: HeroLogic, move: XMove, air: boolean, slide: number): HeroOutput {
+/** 從跑速開始滑行，ms 內減速到 0 */
+function slide(h: HeroLogic, ms: number) {
+  h.slideV = HERO.runSpeed;
+  h.slideDecel = HERO.runSpeed / ticks(ms);
+}
+
+/** 出招：面向鎖定、不能自己左右移動（地面的滑行照樣繼續）；空中招在預備＋判定期間滯空 */
+function startAttack(h: HeroLogic, move: XMove, air: boolean): HeroOutput {
   h.state = HeroState.Attack;
   h.landTicks = 0;
-  h.attack = { move, air, t: 0, queued: false, slide, landed: false };
+  h.attack = { move, air, t: 0, queued: false, landed: false };
   if (air) h.airAttackUsed = true;
   return attackOutput(h);
 }
@@ -260,12 +290,13 @@ function attacking(h: HeroLogic, input: HeroInput): HeroOutput | null {
 
   const frame = frameAt(h.moves[`hero/${a.move}`], a.t);
   if (next && a.queued && (!frame || frame.phase === 'recovery')) {
-    return startAttack(h, next, a.air && !a.landed && !input.onGround, 0);
+    return startAttack(h, next, a.air && !a.landed && !input.onGround);
   }
   if (frame) return attackOutput(h);
 
   h.attack = null;
-  h.state = a.air && !a.landed && !input.onGround ? HeroState.Air : HeroState.Idle;
+  // 招式結束時還在滑，就回到滑行
+  h.state = a.air && !a.landed && !input.onGround ? HeroState.Air : h.slideV > 0 ? HeroState.Slide : HeroState.Idle;
   return null;
 }
 
@@ -274,8 +305,7 @@ function attackOutput(h: HeroLogic): HeroOutput {
   const frame = frameAt(h.moves[`hero/${a.move}`], a.t);
   const spawnWave = a.move === 'x3' && frame?.phase === 'active' && frameAt(h.moves['hero/x3'], a.t - 1)?.phase !== 'active';
   if (a.air && !a.landed && frame?.phase !== 'recovery') return { vx: 0, vy: 0, gravity: false, spawnWave };
-  const slide = Math.max(0, a.slide * (1 - a.t / ticks(HERO.slideMs)));
-  return { vx: h.facing * slide, vy: null, gravity: true, spawnWave };
+  return { vx: h.facing * h.slideV, vy: null, gravity: true, spawnWave };
 }
 
 /** 判定中的那一格：招式、是不是空中招、格名；不在判定期間是 null */
@@ -288,6 +318,7 @@ export function activeFrame(h: HeroLogic): { move: XMove; air: boolean; file: st
 
 function takeoff(h: HeroLogic, dir: number) {
   h.airSpeed = h.state === HeroState.Run ? HERO.runSpeed : HERO.walkSpeed;
+  h.slideV = 0;
   h.airDir = dir;
   h.state = HeroState.Air;
   h.airTicks = 0;
@@ -306,7 +337,7 @@ function land(h: HeroLogic) {
 /** 空中：按著方向才移動，轉向後降速；二段跳；上升中放開 Z 減速一次 */
 function air(h: HeroLogic, f: InputFrame, dir: number, launch?: number): HeroOutput {
   // 空中 X 每次離地一輪；用完後到落地前按 X 沒反應
-  if (launch === undefined && takeBuffered(h.buffer, 'attack', h.tick) && !h.airAttackUsed) return startAttack(h, 'x1', true, 0);
+  if (launch === undefined && takeBuffered(h.buffer, 'attack', h.tick) && !h.airAttackUsed) return startAttack(h, 'x1', true);
   let vy: number | null = launch === undefined ? null : -launch;
   if (vy === null && !h.doubleJumped && takeBuffered(h.buffer, 'jump', h.tick)) {
     h.doubleJumped = true;
@@ -356,6 +387,9 @@ export function heroView(h: HeroLogic): HeroView {
       return { anim: 'hero/hurt', frame: frameAt(h.moves['hero/hurt'], h.stateTicks)?.file ?? h.moves['hero/hurt'].frames?.at(-1)?.file };
     case HeroState.Dead:
       return { anim: 'hero/death', frame: frameAt(h.moves['hero/death'], h.stateTicks)?.file ?? h.moves['hero/death'].frames?.at(-1)?.file };
+    case HeroState.Slide:
+      // 跑步煞車還沒有圖，先借用落地格
+      return jump('land');
     case HeroState.Walk:
       return { anim: 'hero/walk' };
     case HeroState.Run:

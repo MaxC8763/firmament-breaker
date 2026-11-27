@@ -57,7 +57,10 @@ const X3 = { startup: 10, active: 10, recovery: 20 };
 
 /** 照 Arcade 的順序模擬物理：邏輯先決定速度，再「先加重力、再移動」一步；地面在 y＝0，往上是負的 */
 class World {
-  h: HeroLogic = newHero(MOVES);
+  h: HeroLogic;
+  constructor(moves: HeroMoves = MOVES) {
+    this.h = newHero(moves);
+  }
   x = 0;
   y = 0;
   vy = 0;
@@ -103,15 +106,17 @@ describe('走與跑', () => {
     expect(w.h.state).toBe(HeroState.Idle);
   });
 
-  test('250 ms 內連按兩下後按著是跑，放開就停', () => {
+  test('250 ms 內連按兩下後按著是跑，放開就不跑了（滑行一小段）', () => {
     const w = new World();
     w.step([], ['left']);
     idle(w, 5);
     expect(w.step([], ['left']).vx).toBe(-HERO.runSpeed);
     expect(w.h.state).toBe(HeroState.Run);
     expect(w.step(['left']).vx).toBe(-HERO.runSpeed);
-    expect(w.step().vx).toBe(0);
+    w.step();
+    expect(w.h.state).toBe(HeroState.Slide);
     idle(w, 20);
+    expect(w.h.state).toBe(HeroState.Idle);
     expect(w.step([], ['left']).vx).toBe(-HERO.walkSpeed);
   });
 
@@ -435,5 +440,100 @@ describe('主角受擊與死亡', () => {
     w.step();
     expect(w.h.wantsRestart).toBe(true);
     expect(w.h.state).toBe(HeroState.Dead);
+  });
+});
+
+/** 連按兩下跑起來，再按著跑 n 個 tick（預設超過雙擊的 250 ms，之後再按右不會又算成連按兩下） */
+function runRight(w: World, n = 20) {
+  w.step([], ['right']);
+  w.step([], ['right']);
+  for (let i = 0; i < n; i++) w.step(['right']);
+  expect(w.h.state).toBe(HeroState.Run);
+}
+
+describe('停止奔跑的滑行', () => {
+  test('放開跑的方向就滑行，200 ms 內減速到 0、滑大約 60 px 才停', () => {
+    const w = new World();
+    runRight(w);
+    const from = w.x;
+    let slideTicks = 0;
+    let last = Infinity;
+    for (let i = 0; i < 60; i++) {
+      const out = w.step();
+      if (w.h.state !== HeroState.Slide) break;
+      expect(out.vx).toBeGreaterThan(0);
+      expect(out.vx).toBeLessThanOrEqual(last);
+      last = out.vx;
+      slideTicks++;
+    }
+    expect(slideTicks).toBe(ticks(HERO.brakeMs));
+    expect(w.h.state).toBe(HeroState.Idle);
+    expect(Math.abs(w.x - from - (HERO.runSpeed * HERO.brakeMs) / 1000 / 2)).toBeLessThan(10);
+    expect(heroView(w.h).anim).toBe('hero/idle');
+  });
+
+  test('滑行中按著反方向，停得比較快，停下來才轉身往回走', () => {
+    const plain = new World();
+    runRight(plain);
+    let n = 0;
+    while (plain.step().vx > 0) n++;
+
+    const w = new World();
+    runRight(w);
+    let m = 0;
+    while (w.step(['left']).vx > 0) {
+      expect(w.h.facing).toBe(1);
+      m++;
+    }
+    expect(m).toBeLessThan(n);
+    expect(w.step(['left']).vx).toBe(-HERO.walkSpeed);
+  });
+
+  test('滑行中往同方向按，就不滑了、照一般的走', () => {
+    const w = new World();
+    runRight(w);
+    w.step();
+    expect(w.h.state).toBe(HeroState.Slide);
+    expect(w.step(['right'], ['right']).vx).toBe(HERO.walkSpeed);
+    expect(w.h.state).toBe(HeroState.Walk);
+  });
+
+  test('滑行中出 X：出招照樣往前滑到滑行結束，接下一招也不中斷', () => {
+    const w = new World();
+    runRight(w);
+    w.step();
+    const out = w.step([], ['attack']);
+    expect(w.h.attack?.move).toBe('x1');
+    expect(out.vx).toBeGreaterThan(0);
+    const speeds: number[] = [];
+    for (let i = 0; i < 20; i++) speeds.push(w.step([], i === 0 ? ['attack'] : []).vx);
+    // 從放開算起，一共滑 brakeMs，之後出招不再移動
+    const moving = speeds.filter((v) => v > 0).length;
+    expect(moving).toBe(ticks(HERO.brakeMs) - 2);
+    expect(speeds.slice(moving).every((v) => v === 0)).toBe(true);
+  });
+
+  test('滑行比招式長時，招式結束後回到滑行', () => {
+    // 預備、判定、收招各 1 格的短招：滑行還沒結束招式就出完了
+    const short = { ...MOVES, 'hero/x1': group([{ file: 'x1_00', hold: 1, phase: 'startup' }]) };
+    const w = new World(short);
+    runRight(w);
+    w.step([], ['attack']);
+    w.step();
+    for (let i = 0; i < 6 && w.h.state === HeroState.Attack; i++) w.step();
+    expect(w.h.state).toBe(HeroState.Slide);
+    expect(w.h.slideV).toBeGreaterThan(0);
+  });
+
+  test('跑跳保持跑速；從滑行起跳就不帶滑行的速度', () => {
+    const w = new World();
+    runRight(w);
+    expect(w.step(['right'], ['jump']).vx).toBe(HERO.runSpeed);
+    w.untilLanded();
+    const v = new World();
+    runRight(v);
+    v.step();
+    expect(v.step([], ['jump']).vx).toBe(0);
+    expect(v.h.slideV).toBe(0);
   });
 });

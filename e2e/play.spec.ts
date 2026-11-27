@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { HERO } from '../src/data/tuning';
 import { shotPath } from './env';
 
 // 遊戲邏輯是固定 tick，幀率低只是一幀補跑幾個 tick：一律等狀態變了再做下一步，不用固定秒數等。
@@ -93,9 +94,11 @@ test.beforeEach(async ({ page }) => {
   await page.waitForFunction(() => document.body.dataset.game === 'ready', null, { timeout: 30_000 });
 });
 
-test('連按兩下 → 跑，鏡頭跟著主角捲動', async ({ page }) => {
+test('連按兩下 → 跑，鏡頭跟著主角捲動；放開後滑行一小段才停', async ({ page }) => {
+  // 先開無敵：會跑過第一隻小兵，被撞到就不跑了
+  await pressOnce(page, '3', 's.hero.invincible');
   await doubleTap(page, 'ArrowRight');
-  expect((await state(page)).hero.vx).toBe(480);
+  expect((await state(page)).hero.vx).toBe(HERO.runSpeed);
   await until(page, 's.hero.x > 1600');
   const s = await state(page);
   expect(s.cameraX).toBeGreaterThan(0);
@@ -103,8 +106,15 @@ test('連按兩下 → 跑，鏡頭跟著主角捲動', async ({ page }) => {
   expect(s.hero.x - s.cameraX).toBeGreaterThan(0);
   expect(s.hero.x - s.cameraX).toBeLessThan(1920);
   await page.screenshot({ path: shotPath('play-run') });
+  await watch(page, `
+    if (s.hero.state === 'Slide' && r.from === undefined) r.from = s.hero.x;
+    if (r.from !== undefined && s.hero.state === 'Idle') r.to = s.hero.x;
+  `);
   await page.keyboard.up('ArrowRight');
-  await until(page, "s.hero.state === 'Idle'");
+  await untilRec(page, 'r.to !== undefined');
+  const { from, to } = await rec(page);
+  console.log(`放開後滑了 ${Math.round(to - from)} px`);
+  expect(to).toBeGreaterThan(from);
 });
 
 test('按住 Z 起跳，腳底最高離地 300 px（±10）', async ({ page }) => {
