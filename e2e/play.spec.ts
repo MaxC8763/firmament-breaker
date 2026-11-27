@@ -78,10 +78,10 @@ async function xxx(page: Page, startWhen = 'true') {
 }
 
 /**
- * 小兵走到前方 150 px 內就出 XXX：太遠的話，每段斬擊的擊退把小兵推出 X3 的斬擊範圍；
- * 太近的話，X2、X3 往前踏之後主角貼著小兵，劍氣生成在它前面、打不到它
+ * 小兵走到前方 250 px 內就出 XXX：X1 的斬擊搆得到（框伸到 210、小兵半寬 66），
+ * X2、X3 往前合計 240 px 會一路追上被擊退的小兵；再近的話，主角會衝到小兵身上，劍氣生成在它前面、打不到它
  */
-const CLOSE_ENOUGH = 's.enemies.some((e) => e.x - s.hero.x < 150)';
+const CLOSE_ENOUGH = 's.enemies.some((e) => e.x - s.hero.x < 250)';
 
 /** 劍氣飛出去 60 px 的那一幀把關卡暫停（畫面照樣算繪），截圖一定拍得到劍氣；截完由 shootFrozen 繼續 */
 const freezeWhenWaveFlies = (page: Page) =>

@@ -115,7 +115,7 @@ describe('走與跑', () => {
     expect(w.step(['left']).vx).toBe(-HERO.runSpeed);
     w.step();
     expect(w.h.state).toBe(HeroState.Slide);
-    idle(w, 20);
+    idle(w, 60);
     expect(w.h.state).toBe(HeroState.Idle);
     expect(w.step([], ['left']).vx).toBe(-HERO.walkSpeed);
   });
@@ -316,16 +316,27 @@ describe('X 連段', () => {
     expect(out.vx).toBe(0);
   });
 
-  test('跑＋X：X1 立刻開始，100 ms 內減速到 0', () => {
+  test('跑＋X：X1 立刻開始，按著方向也照停止奔跑的滑行往前滑、一路減速', () => {
     const w = new World();
     w.step([], ['right']);
     w.step([], ['right']);
     const first = w.step(['right'], ['attack']);
     expect(move(w)).toBe('x1');
     expect(first.vx).toBe(HERO.runSpeed);
-    const speeds = Array.from({ length: ticks(HERO.slideMs) }, () => w.step(['right']).vx);
-    expect(speeds.at(-1)).toBe(0);
-    expect(speeds.every((v, i) => i === 0 || v <= speeds[i - 1])).toBe(true);
+    const speeds: number[] = [];
+    for (;;) {
+      const out = w.step(['right']);
+      if (move(w) !== 'x1') {
+        // 招式結束時還按著跑的方向，就接著跑
+        expect(out.vx).toBe(HERO.runSpeed);
+        expect(w.h.state).toBe(HeroState.Run);
+        break;
+      }
+      speeds.push(out.vx);
+    }
+    // 滑行比 X1 長：整招都還在滑，速度一路變小
+    expect(speeds.every((v) => v > 0)).toBe(true);
+    expect(speeds.every((v, i) => i === 0 || v < speeds[i - 1])).toBe(true);
   });
 });
 
@@ -452,23 +463,20 @@ function runRight(w: World, n = 20) {
 }
 
 describe('停止奔跑的滑行', () => {
-  test('放開跑的方向就滑行，200 ms 內減速到 0、滑大約 60 px 才停', () => {
+  test('放開跑的方向就滑行，等減速滑大約一個地板方格（brakeDistance）才停', () => {
     const w = new World();
     runRight(w);
     const from = w.x;
-    let slideTicks = 0;
     let last = Infinity;
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 120; i++) {
       const out = w.step();
       if (w.h.state !== HeroState.Slide) break;
       expect(out.vx).toBeGreaterThan(0);
-      expect(out.vx).toBeLessThanOrEqual(last);
+      expect(out.vx).toBeLessThan(last);
       last = out.vx;
-      slideTicks++;
     }
-    expect(slideTicks).toBe(ticks(HERO.brakeMs));
     expect(w.h.state).toBe(HeroState.Idle);
-    expect(Math.abs(w.x - from - (HERO.runSpeed * HERO.brakeMs) / 1000 / 2)).toBeLessThan(10);
+    expect(Math.abs(w.x - from - HERO.brakeDistance)).toBeLessThan(10);
     expect(heroView(w.h).anim).toBe('hero/idle');
   });
 
@@ -498,31 +506,19 @@ describe('停止奔跑的滑行', () => {
     expect(w.h.state).toBe(HeroState.Walk);
   });
 
-  test('滑行中出 X：出招照樣往前滑到滑行結束（接下一招也不中斷，見「滑行和往前踏重疊」）', () => {
+  test('滑行中出 X：出招照樣往前滑；招式出完還在滑就回到滑行，滑完才停，總距離不變', () => {
     const w = new World();
     runRight(w);
+    const from = w.x;
     w.step();
     const out = w.step([], ['attack']);
     expect(w.h.attack?.move).toBe('x1');
     expect(out.vx).toBeGreaterThan(0);
-    const speeds: number[] = [];
-    for (let i = 0; i < 20; i++) speeds.push(w.step().vx);
-    // 從放開算起，一共滑 brakeMs，之後出招不再移動
-    const moving = speeds.filter((v) => v > 0).length;
-    expect(moving).toBe(ticks(HERO.brakeMs) - 2);
-    expect(speeds.slice(moving).every((v) => v === 0)).toBe(true);
-  });
-
-  test('滑行比招式長時，招式結束後回到滑行', () => {
-    // 預備、判定、收招各 1 格的短招：滑行還沒結束招式就出完了
-    const short = { ...MOVES, 'hero/x1': group([{ file: 'x1_00', hold: 1, phase: 'startup' }]) };
-    const w = new World(short);
-    runRight(w);
-    w.step([], ['attack']);
-    w.step();
-    for (let i = 0; i < 6 && w.h.state === HeroState.Attack; i++) w.step();
+    while (w.h.state === HeroState.Attack) expect(w.step().vx).toBeGreaterThan(0);
     expect(w.h.state).toBe(HeroState.Slide);
-    expect(w.h.slideV).toBeGreaterThan(0);
+    while (w.h.state === HeroState.Slide) w.step();
+    expect(w.h.state).toBe(HeroState.Idle);
+    expect(Math.abs(w.x - from - HERO.brakeDistance)).toBeLessThan(10);
   });
 
   test('跑跳保持跑速；從滑行起跳就不帶滑行的速度', () => {
@@ -553,7 +549,7 @@ describe('X2、X3 往前踏', () => {
     return { moved, total: w.x - x.from };
   }
 
-  test('X2 在預備期間往前 30 px、X3 往前 60 px，X1 不動', () => {
+  test('X2、X3 在揮砍期間往前，X3 比 X2 遠、合計一個地板方格；X1 不動', () => {
     const w = new World();
     w.step([], ['attack']);
     const { moved } = comboMoves(w);
@@ -561,6 +557,7 @@ describe('X2、X3 往前踏', () => {
     expect(moved.x2).toBeCloseTo(HERO.lunge.x2);
     expect(moved.x3).toBeCloseTo(HERO.lunge.x3);
     expect(HERO.lunge.x3).toBeGreaterThan(HERO.lunge.x2);
+    expect(HERO.lunge.x2 + HERO.lunge.x3).toBe(240);
   });
 
   test('面向左時往左踏', () => {
@@ -598,24 +595,15 @@ describe('X2、X3 往前踏', () => {
     expect(moved.x3).toBeCloseTo(HERO.lunge.x3);
   });
 
-  test('滑行和往前踏重疊時，兩個速度相加', () => {
-    // X1 只有預備、判定各 1 格：X2 在滑行結束前就開始
-    const short = {
-      ...MOVES,
-      'hero/x1': group([
-        { file: 'x1_00', hold: 1, phase: 'startup' },
-        { file: 'x1_01', hold: 1, phase: 'active' },
-      ]),
-    };
-    const w = new World(short);
+  test('跑＋X 按著方向接 X2：滑行和往前的速度相加', () => {
+    const w = new World();
     runRight(w);
-    w.step();
-    w.step([], ['attack']);
-    w.step([], ['attack']);
-    let out = w.step();
-    while (w.h.attack?.move !== 'x2') out = w.step();
+    w.step(['right'], ['attack']);
+    w.step(['right'], ['attack']);
+    let out = w.step(['right']);
+    while (w.h.attack?.move !== 'x2') out = w.step(['right']);
     expect(w.h.slideV).toBeGreaterThan(0);
-    // X2 的預備是 1 格（5 tick）
-    expect(out.vx).toBeCloseTo(w.h.slideV + (HERO.lunge.x2 / 5) * TICK_HZ);
+    // X2 的揮砍（預備＋判定）是 3 格＝15 tick
+    expect(out.vx).toBeCloseTo(w.h.slideV + (HERO.lunge.x2 / 15) * TICK_HZ);
   });
 });

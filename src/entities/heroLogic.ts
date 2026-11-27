@@ -234,8 +234,8 @@ export function tickHero(h: HeroLogic, input: HeroInput): HeroOutput {
 
   if (h.landTicks > 0) h.landTicks--;
   if (takeBuffered(h.buffer, 'attack', t)) {
-    // 跑＋X：從跑速滑行 slideMs；滑行中出招：剩下的滑行照原本的減速繼續
-    if (h.state === HeroState.Run) slide(h, HERO.slideMs);
+    // 跑＋X：和停止奔跑一樣從跑速滑行；滑行中出招：剩下的滑行照原本的減速繼續
+    if (h.state === HeroState.Run) slide(h);
     return startAttack(h, 'x1', false);
   }
   if (takeBuffered(h.buffer, 'jump', t)) {
@@ -250,7 +250,7 @@ export function tickHero(h: HeroLogic, input: HeroInput): HeroOutput {
   // 停止奔跑：放開跑的方向（或兩個方向一起按）就滑行一小段
   if (h.state === HeroState.Run && !(dir && h.run.runDir === dir)) {
     h.state = HeroState.Slide;
-    slide(h, HERO.brakeMs);
+    slide(h);
     return { vx: h.facing * h.slideV, vy: null, gravity: true };
   }
   if (dir) h.facing = dir > 0 ? 1 : -1;
@@ -260,10 +260,10 @@ export function tickHero(h: HeroLogic, input: HeroInput): HeroOutput {
   return { vx: dir * speed, vy: null, gravity: true };
 }
 
-/** 從跑速開始滑行，ms 內減速到 0 */
-function slide(h: HeroLogic, ms: number) {
+/** 從跑速開始滑行：等減速，滑 brakeDistance 停下 */
+function slide(h: HeroLogic) {
   h.slideV = HERO.runSpeed;
-  h.slideDecel = HERO.runSpeed / ticks(ms);
+  h.slideDecel = (HERO.runSpeed * HERO.runSpeed) / (2 * HERO.brakeDistance) / TICK_HZ;
 }
 
 /** 出招：面向鎖定、不能自己左右移動（地面的滑行、X2／X3 往前踏照樣有）；空中招在預備＋判定期間滯空 */
@@ -300,17 +300,17 @@ function attacking(h: HeroLogic, input: HeroInput): HeroOutput | null {
   return null;
 }
 
-/** 預備期間的 tick 數 */
-const startupTicks = (g: ArtGroup) =>
-  (g.frames ?? []).filter((f) => f.phase === 'startup').reduce((n, f) => n + f.hold, 0) * ticksPerHold(g);
+/** 揮砍期間（預備＋判定）的 tick 數 */
+const swingTicks = (g: ArtGroup) =>
+  (g.frames ?? []).filter((f) => f.phase !== 'recovery').reduce((n, f) => n + f.hold, 0) * ticksPerHold(g);
 
 function attackOutput(h: HeroLogic): HeroOutput {
   const a = h.attack!;
   const g = h.moves[`hero/${a.move}`];
   const frame = frameAt(g, a.t);
   const spawnWave = a.move === 'x3' && frame?.phase === 'active' && frameAt(h.moves['hero/x3'], a.t - 1)?.phase !== 'active';
-  // X2、X3 在預備期間往前踏，距離照預備的格數換成速度；空中照樣滯空，只多了水平位移
-  const lunge = frame?.phase === 'startup' ? (HERO.lunge[a.move] / startupTicks(g)) * TICK_HZ : 0;
+  // X2、X3 在揮砍期間（預備＋判定）均勻往前，距離照格數換成速度；空中照樣滯空，只多了水平位移
+  const lunge = frame && frame.phase !== 'recovery' ? (HERO.lunge[a.move] / swingTicks(g)) * TICK_HZ : 0;
   if (a.air && !a.landed && frame?.phase !== 'recovery') return { vx: h.facing * lunge, vy: 0, gravity: false, spawnWave };
   // 地面的滑行和往前踏重疊時，兩個速度相加
   return { vx: h.facing * (h.slideV + lunge), vy: null, gravity: true, spawnWave };

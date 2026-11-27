@@ -33,14 +33,12 @@ export const HERO = {
   jumpHeight: 300,
   doubleJumpHeight: 220,
   maxFallSpeed: 1500,
-  /** 跑＋X：滑行多久減速到 0 */
-  slideMs: 100,
-  /** 停止奔跑：從跑速滑行多久減速到 0 */
-  brakeMs: 200,
+  /** 停止奔跑與跑＋X 的滑行距離：從跑速等減速到 0，約一個地板方格 */
+  brakeDistance: 240,
   /** 滑行中按著反方向，減速快幾倍 */
   brakeTurnFactor: 3,
-  /** X 連段在預備期間往前踏的距離：抵掉小兵每次受擊的擊退，X3 才打得到 */
-  lunge: { x1: 0, x2: 30, x3: 60 },
+  /** X 連段在揮砍期間（預備＋判定）往前的距離，X2＋X3 合計一個地板方格；抵掉小兵每次受擊的擊退，X3 才打得到 */
+  lunge: { x1: 0, x2: 80, x3: 160 },
   hpMax: 1000,
   mpMax: 300,
   hurtMs: 300,
