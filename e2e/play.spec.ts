@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { HERO } from '../src/data/tuning';
 import { shotPath } from './env';
 
 // 遊戲邏輯是固定 tick，幀率低只是一幀補跑幾個 tick：一律等狀態變了再做下一步，不用固定秒數等。
@@ -49,29 +50,38 @@ async function doubleTap(page: Page, key: string) {
 
 /**
  * 出 XXX：接招的時機只有一招的長度（約 25 tick），機器很忙時 Playwright 一來一回就可能錯過，
- * 所以改在網頁裡每幀看招式，待機、X1、X2 各按一次 X（和真的鍵盤一樣送到 window），到 X3 為止
+ * 所以改在網頁裡每幀看招式，待機、X1、X2 各按一次 X（和真的鍵盤一樣送到 window），到 X3 為止。
+ * startWhen（s＝getState()）成立的那一幀才按第一下：出招時和小兵的距離不受 Playwright 的延遲影響
  */
-async function xxx(page: Page) {
-  await page.evaluate(() => {
+async function xxx(page: Page, startWhen = 'true') {
+  await page.evaluate((startWhen) => {
     const w = window as any;
+    const ready = new Function('s', `return ${startWhen};`);
     const press = () => {
       for (const type of ['keydown', 'keyup']) window.dispatchEvent(new KeyboardEvent(type, { key: 'x', code: 'KeyX', keyCode: 88 } as KeyboardEventInit));
     };
     const pressed = new Set<string>();
     w.__xxx = false;
     const loop = () => {
-      const move = w.__game.getState().hero.move ?? 'none';
+      const s = w.__game.getState();
+      const move = s.hero.move ?? 'none';
       if (move === 'x3') return (w.__xxx = true);
-      if (!pressed.has(move)) {
+      if (!pressed.has(move) && (move !== 'none' || ready(s))) {
         pressed.add(move);
         press();
       }
       requestAnimationFrame(loop);
     };
     loop();
-  });
+  }, startWhen);
   await page.waitForFunction(() => (window as any).__xxx, null, { timeout: 30_000 });
 }
+
+/**
+ * 小兵走到前方 150 px 內就出 XXX：太遠的話，每段斬擊的擊退把小兵推出 X3 的斬擊範圍；
+ * 太近的話，X2、X3 往前踏之後主角貼著小兵，劍氣生成在它前面、打不到它
+ */
+const CLOSE_ENOUGH = 's.enemies.some((e) => e.x - s.hero.x < 150)';
 
 /** 劍氣飛出去 60 px 的那一幀把關卡暫停（畫面照樣算繪），截圖一定拍得到劍氣；截完由 shootFrozen 繼續 */
 const freezeWhenWaveFlies = (page: Page) =>
@@ -93,9 +103,11 @@ test.beforeEach(async ({ page }) => {
   await page.waitForFunction(() => document.body.dataset.game === 'ready', null, { timeout: 30_000 });
 });
 
-test('連按兩下 → 跑，鏡頭跟著主角捲動', async ({ page }) => {
+test('連按兩下 → 跑，鏡頭跟著主角捲動；放開後滑行一小段才停', async ({ page }) => {
+  // 先開無敵：會跑過第一隻小兵，被撞到就不跑了
+  await pressOnce(page, '3', 's.hero.invincible');
   await doubleTap(page, 'ArrowRight');
-  expect((await state(page)).hero.vx).toBe(480);
+  expect((await state(page)).hero.vx).toBe(HERO.runSpeed);
   await until(page, 's.hero.x > 1600');
   const s = await state(page);
   expect(s.cameraX).toBeGreaterThan(0);
@@ -103,8 +115,15 @@ test('連按兩下 → 跑，鏡頭跟著主角捲動', async ({ page }) => {
   expect(s.hero.x - s.cameraX).toBeGreaterThan(0);
   expect(s.hero.x - s.cameraX).toBeLessThan(1920);
   await page.screenshot({ path: shotPath('play-run') });
+  await watch(page, `
+    if (s.hero.state === 'Slide' && r.from === undefined) r.from = s.hero.x;
+    if (r.from !== undefined && s.hero.state === 'Idle') r.to = s.hero.x;
+  `);
   await page.keyboard.up('ArrowRight');
-  await until(page, "s.hero.state === 'Idle'");
+  await untilRec(page, 'r.to !== undefined');
+  const { from, to } = await rec(page);
+  console.log(`放開後滑了 ${Math.round(to - from)} px`);
+  expect(to).toBeGreaterThan(from);
 });
 
 test('按住 Z 起跳，腳底最高離地 300 px（±10）', async ({ page }) => {
@@ -162,13 +181,10 @@ test('XXX 打倒 1 隻小兵，MP 增加 16–20（斬擊 3 段各 5，加上劍
   await page.keyboard.down('ArrowRight');
   await until(page, 's.enemies.some((e) => e.x - s.hero.x < 400)');
   await page.keyboard.up('ArrowRight');
-  // 小兵近一點才出招：每段斬擊都會重新硬直、擊退，X1 打中到 X3 判定約 40 tick，小兵會被推遠約 90 px，
-  // X1 打中時超過 187 px，X3 的斬擊就搆不到（框伸到 210、小兵半寬 66）
-  await until(page, 's.enemies.some((e) => e.x - s.hero.x < 150)');
   const before = await state(page);
   // 劍氣在飛的時候截一張戰鬥畫面（主角、小兵、劍氣、HUD）
   await freezeWhenWaveFlies(page);
-  await xxx(page);
+  await xxx(page, CLOSE_ENOUGH);
   await shootFrozen(page, 'play-combat');
   await until(page, `s.enemies.length === ${before.enemies.length - 1}`);
   const gained = (await state(page)).hero.mp - before.hero.mp;
@@ -201,11 +217,8 @@ test('開發模式：作弊鍵 1 MP 全滿、2 HP 全滿、3 無敵、` 切換�
   await page.keyboard.down('ArrowRight');
   await until(page, 's.enemies.some((e) => e.x - s.hero.x < 400)');
   await page.keyboard.up('ArrowRight');
-  // 小兵近一點才出招：每段斬擊都會重新硬直、擊退，X1 打中到 X3 判定約 40 tick，小兵會被推遠約 90 px，
-  // X1 打中時超過 187 px，X3 的斬擊就搆不到（框伸到 210、小兵半寬 66）
-  await until(page, 's.enemies.some((e) => e.x - s.hero.x < 150)');
   await freezeWhenWaveFlies(page);
-  await xxx(page);
+  await xxx(page, CLOSE_ENOUGH);
   await shootFrozen(page, 'play-dev');
   // 關掉無敵，往右走到被下一隻小兵撞到，再用 2 補滿
   await pressOnce(page, '3', '!s.hero.invincible');

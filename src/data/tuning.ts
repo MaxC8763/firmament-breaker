@@ -24,7 +24,8 @@ export const HERO = {
   /** 入口：地圖左端 */
   startX: 240,
   walkSpeed: 300,
-  runSpeed: 480,
+  /** 先試原本 480 的 1.2 倍 */
+  runSpeed: 576,
   /** 空中轉向後、或不是跑跳時的水平速度 */
   airTurnSpeed: 300,
   gravity: GRAVITY,
@@ -34,6 +35,12 @@ export const HERO = {
   maxFallSpeed: 1500,
   /** 跑＋X：滑行多久減速到 0 */
   slideMs: 100,
+  /** 停止奔跑：從跑速滑行多久減速到 0 */
+  brakeMs: 200,
+  /** 滑行中按著反方向，減速快幾倍 */
+  brakeTurnFactor: 3,
+  /** X 連段在預備期間往前踏的距離：抵掉小兵每次受擊的擊退，X3 才打得到 */
+  lunge: { x1: 0, x2: 30, x3: 60 },
   hpMax: 1000,
   mpMax: 300,
   hurtMs: 300,
