@@ -1,34 +1,96 @@
 import Phaser from 'phaser';
 import type { Manifest } from '../data/manifest';
-import { GROUND_Y } from '../data/tuning';
+import { GROUND_Y, TICK_HZ, WORLD_WIDTH } from '../data/tuning';
 import { installDevTools } from '../dev/devTools';
+import { Hero } from '../entities/Hero';
+import { noButtons, type Button, type InputFrame } from '../input/input';
+
+const TICK_MS = 1000 / TICK_HZ;
+/** 卡頓後最多補多少時間，避免一次補跑太多 tick */
+const MAX_DELTA_MS = 100;
+/** 兩端牆的厚度 */
+const WALL = 24;
+
+const KEYS: Record<Button, number> = {
+  left: Phaser.Input.Keyboard.KeyCodes.LEFT,
+  right: Phaser.Input.Keyboard.KeyCodes.RIGHT,
+  jump: Phaser.Input.Keyboard.KeyCodes.Z,
+  attack: Phaser.Input.Keyboard.KeyCodes.X,
+};
 
 export class Stage extends Phaser.Scene {
+  hero: Hero;
+  private keys: Record<Button, Phaser.Input.Keyboard.Key>;
+  /** 還沒累積滿一個 tick 的時間 */
+  private elapsed: number;
+  /** 剛按下、還沒被 tick 讀到的鍵：這一幀沒有跑 tick 時留給下一幀 */
+  private pressed: Record<Button, boolean>;
+
   constructor() {
     super('Stage');
   }
 
+  init() {
+    this.elapsed = 0;
+    this.pressed = noButtons();
+  }
+
   create() {
-    const { width, height } = this.scale;
-    const g = this.add.graphics();
-    g.fillStyle(0x3b4a3f);
-    g.fillRect(0, GROUND_Y, width, height - GROUND_Y);
-    g.lineStyle(4, 0x1b1b1b);
-    g.lineBetween(0, GROUND_Y, width, GROUND_Y);
+    this.drawBackground();
+    this.physics.world.setBounds(WALL, 0, WORLD_WIDTH - WALL * 2, GROUND_Y, true, true, false, true);
 
-    // 主角的定位點是腳底：origin＝pivot ÷ 畫布，所以 y 直接放地平線
     const manifest: Manifest = this.cache.json.get('manifest');
-    const idle = manifest.groups['hero/idle'];
-    const [cw, ch] = idle.canvas;
-    const [px, py] = idle.pivot ?? [cw / 2, ch];
-    const hero = this.add
-      .sprite(width / 2, GROUND_Y, 'art', `hero/idle/${idle.frames?.[0]?.file}`)
-      .setOrigin(px / cw, py / ch)
-      .play('hero/idle');
+    this.hero = new Hero(this, manifest);
+    this.hero.show();
 
-    if (import.meta.env.DEV) installDevTools(this, hero, manifest);
+    // 鏡頭只水平跟隨
+    this.cameras.main.setBounds(0, 0, WORLD_WIDTH, this.scale.height);
+    this.cameras.main.startFollow(this.hero, false, 0.15, 0);
+
+    this.keys = this.input.keyboard!.addKeys(KEYS) as Record<Button, Phaser.Input.Keyboard.Key>;
+    // 用按下事件記「剛按下」：同一幀裡按下又放開時，JustDown 讀不到。場景關閉時鍵盤外掛會連同監聽一起移除
+    for (const b of Object.keys(KEYS) as Button[]) this.keys[b].on(Phaser.Input.Keyboard.Events.DOWN, () => (this.pressed[b] = true));
+
+    if (import.meta.env.DEV) installDevTools(this, manifest);
 
     // smoke 與 e2e 靠這個旗標判斷遊戲已經起來
     document.body.dataset.game = 'ready';
+  }
+
+  update(_time: number, delta: number) {
+    // 每幀只在這裡讀一次鍵盤；剛按下的鍵存到被 tick 讀到為止
+    const held = noButtons();
+    for (const b of Object.keys(KEYS) as Button[]) held[b] = this.keys[b].isDown;
+
+    this.elapsed += Math.min(delta, MAX_DELTA_MS);
+    while (this.elapsed >= TICK_MS) {
+      this.elapsed -= TICK_MS;
+      const frame: InputFrame = { held: { ...held }, pressed: this.pressed };
+      // 剛按就放開的鍵，這個 tick 也算按著
+      for (const b of Object.keys(KEYS) as Button[]) frame.held[b] ||= this.pressed[b];
+      this.pressed = noButtons();
+      this.hero.step(frame);
+    }
+    this.hero.show();
+  }
+
+  /** 程式畫的背景：遠山以半速捲動，地面每 240 px 一格，看得出鏡頭在動 */
+  private drawBackground() {
+    const { height } = this.scale;
+    const far = this.add.graphics().setScrollFactor(0.5);
+    far.fillStyle(0xa9c8d8);
+    for (let x = 0; x < WORLD_WIDTH; x += 360) far.fillEllipse(x + 180, GROUND_Y, 520, 360 + ((x / 360) % 3) * 80);
+
+    const g = this.add.graphics();
+    for (let x = 0; x < WORLD_WIDTH; x += 240) {
+      g.fillStyle((x / 240) % 2 ? 0x3b4a3f : 0x45574a);
+      g.fillRect(x, GROUND_Y, 240, height - GROUND_Y);
+    }
+    g.lineStyle(4, 0x1b1b1b);
+    g.lineBetween(0, GROUND_Y, WORLD_WIDTH, GROUND_Y);
+    // 兩端的牆
+    g.fillStyle(0x2a2f2b);
+    g.fillRect(0, 0, WALL, GROUND_Y);
+    g.fillRect(WORLD_WIDTH - WALL, 0, WALL, GROUND_Y);
   }
 }
