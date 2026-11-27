@@ -9,7 +9,7 @@ import { heroView, HeroState } from '../entities/heroLogic';
 import { HIT_EVENT, onKey, type Stage } from '../scenes/Stage';
 
 const KEY = Phaser.Input.Keyboard.KeyCodes;
-const COLOR = { hurtbox: 0x2f7bff, attack: 0xff3040, wave: 0xff9a1f, cross: 0xe0218a };
+const COLOR = { hurtbox: 0x2f7bff, attack: 0xff3040, wave: 0xff9a1f, enemyAttack: 0x9b30ff, cross: 0xe0218a };
 
 // 只在開發模式（npm run dev）載入：正式建置裡 import.meta.env.DEV 是 false，這段會被整個拿掉
 
@@ -39,6 +39,8 @@ export interface GameState {
   items: { kind: string; x: number; y: number }[];
   /** 這張地圖打中敵人回了多少 MP（不含自然回復與道具；超過上限捨去的也算） */
   mpFromHits: number;
+  /** 飛行中的敵方彈丸（中心） */
+  bullets: { x: number; y: number }[];
   /** 飛行中的劍氣，x 是世界座標，fromX 是生成時的 x */
   waves: { x: number; y: number; fromX: number }[];
   /** 這一局生成過幾道劍氣 */
@@ -99,6 +101,7 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
     const attack = scene.heroAttackBox();
     if (attack) rect(attack, COLOR.attack, true);
     for (const w of scene.waves) rect(scene.waveBox(w), COLOR.wave, true);
+    for (const b of scene.bullets) rect(scene.bulletBox(b.p), COLOR.enemyAttack, true);
     boxes.lineStyle(2, COLOR.cross);
     boxes.lineBetween(hero.x - 14, hero.y, hero.x + 14, hero.y);
     boxes.lineBetween(hero.x, hero.y - 14, hero.x, hero.y + 14);
@@ -164,6 +167,7 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
         enemies: scene.enemies.map((e) => ({ kind: e.logic.kind, x: e.x, y: e.y, state: EnemyState[e.logic.state], facing: e.logic.facing, hp: e.logic.hp })),
         items: scene.items.map((i) => ({ kind: i.kind, x: i.sprite.x, y: i.sprite.y })),
         mpFromHits,
+        bullets: scene.bullets.map((b) => ({ x: b.p.x, y: b.p.y })),
         waves: scene.waves.map((w) => ({ x: w.sprite.x, y: w.sprite.y, fromX: w.fromX })),
         wavesSpawned: scene.wavesSpawned,
         devShown: shown,

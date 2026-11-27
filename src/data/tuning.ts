@@ -103,6 +103,8 @@ export const ENEMY = {
 export const ENEMIES = {
   /** A 小兵 */
   grunt: { hp: 120, speed: 120, chaseRange: 600 },
+  /** B 砲手：不動；主角在水平 range 內，每 intervalMs 朝主角那側水平射一發，彈丸從腳底前方 muzzleX、上方 muzzleY 出來 */
+  gunner: { hp: 120, range: 900, intervalMs: 2000, bulletSpeed: 500, bulletDamage: 60, muzzleX: 90, muzzleY: 110 },
 };
 
 export type EnemyKind = keyof typeof ENEMIES;

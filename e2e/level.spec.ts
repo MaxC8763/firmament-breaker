@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { DOOR, LOW, MAPS } from '../src/data/maps';
+import { ENEMIES } from '../src/data/tuning';
 import { shotPath } from './env';
 import { pressOnce, rec, ready, resumeGame, state, until, untilRec, watch } from './helpers';
 
@@ -167,4 +168,34 @@ test('不動 10 秒進入打盹（頭上冒 Zzz），按 → 驚醒後往右走'
   await untilRec(page, 'r.walked');
   await until(page, `s.hero.x > ${x + 30}`);
   await page.keyboard.up('ArrowRight');
+});
+
+test('砲手的彈丸打中主角 HP −60；用 X 砍掉彈丸，命中回復的 MP 沒有增加', async ({ page }) => {
+  // 第 2 張入口前方有一隻砲手：主角站在入口不動，2 秒多後彈丸飛過來
+  await game(page, 'enter(1, 1000, 0)');
+  await until(page, 's.map === 1');
+  await pressOnce(page, 'Backquote', '!s.devShown');
+  await watch(page, `
+    if (!r.shot && s.bullets.length > 0 && s.bullets[0].x - s.hero.x < 400) { r.shot = true; window.__game.pause(); }
+  `);
+  await untilRec(page, 'r.shot');
+  await page.screenshot({ path: shotPath('level-gunner') });
+  await resumeGame(page);
+  await until(page, 's.hero.hp < 1000');
+  expect((await state(page)).hero.hp).toBe(1000 - ENEMIES.gunner.bulletDamage);
+
+  // 下一發：彈丸飛到主角前方 260 px 內就出 X（在網頁裡每幀看，Playwright 一來一回趕不上）
+  await until(page, "s.hero.state === 'Idle' && s.bullets.length === 0");
+  const before = await state(page);
+  await watch(page, `
+    if (!r.pressed && s.bullets.some((b) => b.x > s.hero.x && b.x - s.hero.x < 260)) {
+      r.pressed = true;
+      for (const type of ['keydown', 'keyup']) window.dispatchEvent(new KeyboardEvent(type, { key: 'x', code: 'KeyX', keyCode: 88 }));
+    }
+    if (r.pressed && s.bullets.length === 0 && !r.after) r.after = { hp: s.hero.hp, mpFromHits: s.mpFromHits };
+  `);
+  await untilRec(page, 'r.after');
+  const { after } = await rec(page);
+  expect(after.hp).toBe(before.hero.hp);
+  expect(after.mpFromHits).toBe(before.mpFromHits);
 });

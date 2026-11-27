@@ -3,12 +3,13 @@ import { toWorld } from '../combat/hitbox';
 import hitboxes from '../data/hitboxes.json';
 import type { Manifest } from '../data/manifest';
 import { ENEMY, GRAVITY, GROUND_Y, ticks, type EnemyKind } from '../data/tuning';
-import { EnemyState, holdTicks, newEnemy, tickEnemy, type EnemyLogic } from './enemyLogic';
+import { attackFrame, EnemyState, holdTicks, newEnemy, tickEnemy, type EnemyLogic } from './enemyLogic';
 
 /** 各狀態播哪個動作：動畫鍵是 enemies/<種類>/<動作> */
 const ACTION: Record<EnemyState, string> = {
   [EnemyState.Idle]: 'idle',
   [EnemyState.Walk]: 'move',
+  [EnemyState.Attack]: 'attack',
   [EnemyState.Hurt]: 'hurt',
   [EnemyState.Dying]: 'hurt',
   [EnemyState.Death]: 'death',
@@ -28,7 +29,7 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     scene.add.existing(this);
     scene.physics.add.existing(this);
     const death = manifest.groups[`enemies/${kind}/death`];
-    this.logic = newEnemy(kind, x, holdTicks((death.frames ?? []).map((f) => f.hold), death.fps));
+    this.logic = newEnemy(kind, x, holdTicks((death.frames ?? []).map((f) => f.hold), death.fps), manifest.groups[`enemies/${kind}/attack`]);
 
     const [cw, ch] = idle.canvas;
     const [px, py] = idle.pivot ?? [cw / 2, ch];
@@ -39,10 +40,13 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     this.body.setGravityY(GRAVITY);
   }
 
+  /** 跑一個邏輯 tick，把速度交給物理；回傳邏輯的結果，讓場景生成彈丸 */
   step(heroX: number) {
     this.logic.x = this.x;
-    this.body.setVelocityX(tickEnemy(this.logic, heroX));
+    const out = tickEnemy(this.logic, heroX);
+    this.body.setVelocityX(out.vx);
     if (this.flashTicks > 0) this.flashTicks--;
+    return out;
   }
 
   /** 被打的範圍（世界座標） */
@@ -56,7 +60,13 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
 
   show() {
     this.setFlipX(this.logic.facing < 0);
-    this.play(`enemies/${this.logic.kind}/${ACTION[this.logic.state]}`, true);
+    // 出招的格由邏輯指定，其他動作循環播放
+    const key = `enemies/${this.logic.kind}/${ACTION[this.logic.state]}`;
+    const frame = attackFrame(this.logic);
+    if (frame) {
+      this.anims.stop();
+      this.setFrame(`${key}/${frame.file}`);
+    } else this.play(key, true);
     if (this.flashTicks > 0) this.setTint(0xffffff).setTintMode(Phaser.TintModes.FILL);
     else this.clearTint();
   }

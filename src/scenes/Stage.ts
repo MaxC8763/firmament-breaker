@@ -1,10 +1,11 @@
 import Phaser from 'phaser';
 import { addMp, newAttack, strike, type AttackInstance, type AttackSpec, type HitResult } from '../combat/attack';
+import { stepProjectile, type Projectile } from '../combat/projectile';
 import { attackShape, overlaps, toWorld, type Box, type HitboxData } from '../combat/hitbox';
 import hitboxes from '../data/hitboxes.json';
 import type { Manifest } from '../data/manifest';
 import { DOOR, doorOpen, LEVEL_START, MAPS, nextEntry, PLATFORM_THICKNESS, type Entry, type MapData } from '../data/maps';
-import { ENEMY, GROUND_Y, HERO, SLASH, TICK_HZ, WAVE, WORLD_WIDTH, ticks } from '../data/tuning';
+import { ENEMIES, ENEMY, GROUND_Y, HERO, SLASH, TICK_HZ, WAVE, WORLD_WIDTH, ticks } from '../data/tuning';
 import { installDevTools } from '../dev/devTools';
 import { Enemy } from '../entities/Enemy';
 import { enemyHarmful, EnemyState, hurtEnemy } from '../entities/enemyLogic';
@@ -76,6 +77,8 @@ export class Stage extends Phaser.Scene {
   waves: Wave[];
   /** 這一局生成過幾道劍氣 */
   wavesSpawned: number;
+  /** 飛行中的敵方彈丸 */
+  bullets: { p: Projectile; sprite: Phaser.GameObjects.Sprite }[];
   /** 正在出的招和它的攻擊實例；換招時舊的實例結束 */
   private slash: { move: Attack; attack: AttackInstance } | null;
   /** 命中停頓還剩幾個 tick：期間邏輯與物理都不前進 */
@@ -111,6 +114,7 @@ export class Stage extends Phaser.Scene {
     this.pressed = noButtons();
     this.waves = [];
     this.wavesSpawned = 0;
+    this.bullets = [];
     this.slash = null;
     this.hitstop = 0;
     this.restarting = false;
@@ -220,13 +224,15 @@ export class Stage extends Phaser.Scene {
   private tick(frame: InputFrame) {
     const out = this.hero.step(frame);
     if (out.dropThrough) this.dropY = this.hero.body.bottom;
-    for (const e of this.enemies) e.step(this.hero.x);
+    const shooters = this.enemies.filter((e) => e.step(this.hero.x).shoot);
     this.physics.world.singleStep();
     // 腳底掉過平台的下緣，那個平台的上緣已經離得夠遠，物理不會再把主角推回上面
     if (this.dropY !== null && this.hero.body.bottom > this.dropY + PLATFORM_THICKNESS) this.dropY = null;
     if (out.spawnWave) this.spawnWave();
+    for (const e of shooters) this.spawnBullet(e);
     this.moveWaves();
     this.resolveHits();
+    this.moveBullets();
     this.contactDamage();
     this.pickItems();
     for (const e of this.enemies) if (e.logic.state === EnemyState.Gone) e.destroy();
@@ -376,6 +382,38 @@ export class Stage extends Phaser.Scene {
       .play('effects/x3_wave');
     this.waves.push({ sprite, fromX: sprite.x, dir, age: 0, attack: newAttack(WAVE_SPEC) });
     this.wavesSpawned++;
+  }
+
+  /** 砲手射擊動作的發射格：彈丸從腳底前方、上方出來，朝面向的方向水平飛 */
+  private spawnBullet(e: Enemy) {
+    const { muzzleX, muzzleY, bulletSpeed } = ENEMIES.gunner;
+    const dir = e.logic.facing;
+    const p: Projectile = { x: e.x + dir * muzzleX, y: e.y - muzzleY, vx: (dir * bulletSpeed) / TICK_HZ };
+    this.bullets.push({ p, sprite: this.add.sprite(p.x, p.y, 'art').play('enemies/gunner/bullet') });
+  }
+
+  /**
+   * 彈丸往前飛：撞到地圖兩端的牆就消失；主角的斬擊（判定格）與劍氣碰到就消除（不回 MP、不停頓，劍氣照樣往前飛）；
+   * 打中主角照一般受擊、彈丸消失，主角無敵中就穿過去
+   */
+  private moveBullets() {
+    const heroBox = this.heroHurtbox();
+    const slash = this.heroAttackBox();
+    const attacks = [...(slash ? [slash] : []), ...this.waves.map((w) => this.waveBox(w))];
+    const bounds = { left: WALL, right: WORLD_WIDTH - WALL };
+    this.bullets = this.bullets.filter(({ p, sprite }) => {
+      const result = stepProjectile(p, hitboxes.enemies.gunner.bullet, bounds, heroBox, attacks);
+      if (result === 'fly' || (result === 'hero' && !hurtHero(this.hero.logic, ENEMIES.gunner.bulletDamage, Math.sign(p.vx)))) {
+        sprite.x = p.x;
+        return true;
+      }
+      sprite.destroy();
+      return false;
+    });
+  }
+
+  bulletBox(p: Projectile): Box {
+    return toWorld(hitboxes.enemies.gunner.bullet, p.x, p.y, Math.sign(p.vx) || 1);
   }
 
   /** 劍氣等速往前飛，lifeMs 後消失 */

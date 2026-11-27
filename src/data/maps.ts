@@ -57,8 +57,10 @@ export const MAPS: MapData[] = [
       { x: 2880, top: HIGH, w: 240 },
     ],
     enemies: [
+      { kind: 'gunner', x: 900 },
       { kind: 'grunt', x: 1500 },
       { kind: 'grunt', x: 2600 },
+      { kind: 'gunner', x: 3200 },
     ],
     items: [
       { kind: 'hp', x: 1440, y: HIGH },
@@ -78,6 +80,7 @@ export const MAPS: MapData[] = [
     enemies: [
       { kind: 'grunt', x: 1400 },
       { kind: 'grunt', x: 2200 },
+      { kind: 'gunner', x: 2700 },
     ],
     items: [
       { kind: 'hp', x: 1200, y: HIGH },
