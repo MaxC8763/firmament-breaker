@@ -6,7 +6,7 @@ import { GROUND_Y, HERO } from '../data/tuning';
 import type { Grunt } from '../entities/Grunt';
 import { GruntState, hurtGrunt } from '../entities/gruntLogic';
 import { heroView, HeroState } from '../entities/heroLogic';
-import { HIT_EVENT, type Stage } from '../scenes/Stage';
+import { HIT_EVENT, onKey, type Stage } from '../scenes/Stage';
 
 const KEY = Phaser.Input.Keyboard.KeyCodes;
 const COLOR = { hurtbox: 0x2f7bff, attack: 0xff3040, wave: 0xff9a1f, cross: 0xe0218a };
@@ -55,6 +55,8 @@ export interface GameState {
   doorOpen: boolean;
   /** 關卡完成畫面 */
   complete: boolean;
+  /** 暫停選單開著，關卡停住 */
+  paused: boolean;
 }
 
 declare global {
@@ -122,17 +124,9 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
     scene.events.off(HIT_EVENT, onHit);
   });
 
-  // 作弊鍵：1＝MP 全滿、2＝HP 全滿、3＝無敵切換、4＝這張地圖的敵人 HP 全部歸零（開門用）、`＝切換上面的顯示。按鍵在場景關閉時連同監聽一起移除。
-  // 鍵盤外掛在同一幀裡收到下一個按鍵時，會把這一幀已經處理過的按鍵事件從頭再處理一次，DOWN 會重複觸發；
-  // 切換類的鍵按一下只能切一次，所以用事件物件去重
-  const keys = scene.input.keyboard!;
-  const handled = new WeakSet<KeyboardEvent>();
-  const cheat = (code: number, fn: () => void) =>
-    keys.addKey(code).on(Phaser.Input.Keyboard.Events.DOWN, (_key: Phaser.Input.Keyboard.Key, event: KeyboardEvent) => {
-      if (handled.has(event)) return;
-      handled.add(event);
-      fn();
-    });
+  // 作弊鍵：1＝MP 全滿、2＝HP 全滿、3＝無敵切換、4＝這張地圖的敵人 HP 全部歸零（開門用）、`＝切換上面的顯示。
+  // 切換類的鍵按一下只能切一次：onKey 用事件物件去重
+  const cheat = (code: number, fn: () => void) => onKey(scene, code, fn);
   cheat(KEY.ONE, () => (hero.logic.mp = HERO.mpMax));
   cheat(KEY.TWO, () => (hero.logic.hp = HERO.hpMax));
   cheat(KEY.THREE, () => (hero.logic.invincible = !hero.logic.invincible));
@@ -179,6 +173,7 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
         entry: { hp: scene.entry.hp, mp: scene.entry.mp },
         doorOpen: scene.isDoorOpen(),
         complete: scene.complete,
+        paused: scene.scene.isPaused(),
       };
     },
     pause: () => scene.scene.pause(),

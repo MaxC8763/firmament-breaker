@@ -28,6 +28,10 @@ const watchRestart = (page: Page) =>
     r.last = s.tick;
   `);
 
+/** 等網頁畫 n 幀：關卡停住時 tick 不該前進 */
+const frames = (page: Page, n: number) =>
+  page.evaluate((n) => new Promise((done) => { const f = () => (--n > 0 ? requestAnimationFrame(f) : done(null)); requestAnimationFrame(f); }), n);
+
 /** 站到門前 */
 async function atDoor(page: Page) {
   await game(page, `placeHero(${DOOR.x})`);
@@ -102,7 +106,7 @@ test('第 3 張的門 → 關卡完成畫面（關卡停住）→ 按 Z 回到�
   await page.screenshot({ path: shotPath('level-complete') });
   // 關卡停住：過 10 幀 tick 也沒有前進
   const { tick } = await state(page);
-  await page.evaluate(() => new Promise((done) => { let n = 10; const f = () => (--n ? requestAnimationFrame(f) : done(null)); requestAnimationFrame(f); }));
+  await frames(page, 10);
   expect((await state(page)).tick).toBe(tick);
   await watchRestart(page);
   await page.keyboard.press('z');
@@ -125,4 +129,27 @@ test('平台上的 MP 道具：從底下走過吃不到，跳上去就吃到，M
   const gained = (await state(page)).hero.mp - before.hero.mp;
   console.log(`吃到 MP 道具，MP +${gained}`);
   expect(gained).toBeGreaterThanOrEqual(100);
+});
+
+test('暫停選單：Esc 停住關卡、再按 Esc 繼續；選「從關卡開頭重來」回到第 1 張、HP 1000、MP 0', async ({ page }) => {
+  await page.keyboard.press('Escape');
+  await until(page, 's.paused');
+  const { tick } = await state(page);
+  await frames(page, 10);
+  expect((await state(page)).tick).toBe(tick);
+  await page.screenshot({ path: shotPath('level-pause') });
+  await page.keyboard.press('Escape');
+  await until(page, `!s.paused && s.tick > ${tick}`);
+
+  // 到第 2 張、HP／MP 都不是關卡開頭的值，再從暫停選單回到關卡開頭
+  await game(page, 'enter(1, 400, 250)');
+  await until(page, 's.map === 1');
+  await page.keyboard.press('Escape');
+  await until(page, 's.paused');
+  await page.keyboard.press('ArrowDown');
+  await watchRestart(page);
+  await page.keyboard.press('z');
+  await untilRec(page, 'r.first');
+  expect((await rec(page)).first).toMatchObject({ map: 0, hp: 1000, mp: 0 });
+  expect((await state(page)).paused).toBe(false);
 });

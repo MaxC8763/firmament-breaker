@@ -50,6 +50,20 @@ const KEYS: Record<Button, number> = {
   attack: Phaser.Input.Keyboard.KeyCodes.X,
 };
 
+/**
+ * 按一下 code 就呼叫 fn，同一個按鍵事件只處理一次：Phaser 4.2.1 的鍵盤外掛在同一幀收到下一個按鍵時，
+ * 會把這一幀已經處理過的按鍵事件從頭重播。開關暫停選單的 Esc、選單的鍵、作弊鍵共用這份記錄，一次按鍵不會被處理兩次。
+ * 按鍵在場景關閉時連同監聽一起移除
+ */
+const handledKeys = new WeakSet<KeyboardEvent>();
+export function onKey(scene: Phaser.Scene, code: number, fn: () => void) {
+  scene.input.keyboard!.addKey(code).on(Phaser.Input.Keyboard.Events.DOWN, (_key: Phaser.Input.Keyboard.Key, event: KeyboardEvent) => {
+    if (handledKeys.has(event)) return;
+    handledKeys.add(event);
+    fn();
+  });
+}
+
 export class Stage extends Phaser.Scene {
   /** 這張地圖和進入時的 HP／MP（死亡重來用） */
   entry: Entry;
@@ -152,6 +166,19 @@ export class Stage extends Phaser.Scene {
     this.keys = this.input.keyboard!.addKeys(KEYS) as Record<Button, Phaser.Input.Keyboard.Key>;
     // 用按下事件記「剛按下」：同一幀裡按下又放開時，JustDown 讀不到。場景關閉時鍵盤外掛會連同監聽一起移除
     for (const b of Object.keys(KEYS) as Button[]) this.keys[b].on(Phaser.Input.Keyboard.Events.DOWN, () => (this.pressed[b] = true));
+
+    // Esc：暫停選單疊在關卡上面、關卡停住。關卡停住時鍵盤外掛會把按著的鍵都放開；恢復時丟掉累積的時間與剛按下的鍵，不會一次補跑好幾個 tick
+    onKey(this, Phaser.Input.Keyboard.KeyCodes.ESC, () => {
+      if (this.complete || this.restarting) return;
+      this.scene.launch('Pause');
+      this.scene.pause();
+    });
+    const onResume = () => {
+      this.elapsed = 0;
+      this.pressed = noButtons();
+    };
+    this.events.on(Phaser.Scenes.Events.RESUME, onResume);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.events.off(Phaser.Scenes.Events.RESUME, onResume));
 
     if (import.meta.env.DEV) installDevTools(this, manifest);
 
