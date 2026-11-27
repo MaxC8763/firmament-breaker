@@ -1,9 +1,9 @@
 import Phaser from 'phaser';
 import hitboxes from '../data/hitboxes.json';
 import type { Manifest } from '../data/manifest';
-import { GROUND_Y, HERO } from '../data/tuning';
+import { GROUND_Y, HERO, ticks } from '../data/tuning';
 import type { InputFrame } from '../input/input';
-import { heroView, newHero, tickHero, type HeroMoves } from './heroLogic';
+import { HeroState, heroView, newHero, tickHero, type HeroMoves } from './heroLogic';
 
 // 主角的薄殼：物理 body、動畫、翻面；決策都在 heroLogic
 export class Hero extends Phaser.Physics.Arcade.Sprite {
@@ -37,9 +37,13 @@ export class Hero extends Phaser.Physics.Arcade.Sprite {
     return out;
   }
 
-  /** 每幀一次：照邏輯的狀態換動畫與面向 */
+  /** 每幀一次：照邏輯的狀態換動畫與面向；受擊閃白，之後無敵期間閃爍 */
   show() {
-    this.setFlipX(this.logic.facing < 0);
+    const h = this.logic;
+    this.setFlipX(h.facing < 0);
+    if (h.state === HeroState.Hurt && h.stateTicks < ticks(HERO.flashMs)) this.setTint(0xffffff).setTintMode(Phaser.TintModes.FILL);
+    else this.clearTint();
+    this.setAlpha(h.invulnTicks > 0 && h.state !== HeroState.Hurt && Math.floor(h.invulnTicks / 4) % 2 ? 0.35 : 1);
     const { anim, frame } = heroView(this.logic);
     if (frame === undefined) this.play(anim, true);
     else {

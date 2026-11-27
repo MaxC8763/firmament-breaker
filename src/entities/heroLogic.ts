@@ -18,6 +18,10 @@ export enum HeroState {
   Run,
   Air,
   Attack,
+  /** 受擊硬直，往後退 */
+  Hurt,
+  /** HP 歸零，播完死亡動畫就要求重來 */
+  Dead,
 }
 
 /** X 連段的三招；X3 沒有下一招 */
@@ -70,7 +74,18 @@ export interface HeroLogic {
   attack: Attack | null;
   /** 這次離地用過空中 X 了沒（停在 X1、X2、X3 都算一輪） */
   airAttackUsed: boolean;
+  hp: number;
   mp: number;
+  /** 目前狀態經過的 tick（受擊、死亡） */
+  stateTicks: number;
+  /** 受擊後的無敵還剩幾個 tick */
+  invulnTicks: number;
+  /** 被擊退的方向 */
+  knockDir: number;
+  /** 開發模式的無敵作弊 */
+  invincible: boolean;
+  /** 死亡動畫播完了，場景該重來 */
+  wantsRestart: boolean;
 }
 
 export interface HeroInput {
@@ -149,8 +164,29 @@ export const newHero = (moves: HeroMoves): HeroLogic => ({
   landTicks: 0,
   attack: null,
   airAttackUsed: false,
+  hp: HERO.hpMax,
   mp: 0,
+  stateTicks: 0,
+  invulnTicks: 0,
+  knockDir: 0,
+  invincible: false,
+  wantsRestart: false,
 });
+
+/** 擊退速度：硬直期間等速退完擊退距離 */
+const KNOCK_SPEED = HERO.knockback / (HERO.hurtMs / 1000);
+
+/** 被打：無敵中不受傷；否則扣血、打斷出招、硬直並往 dir 擊退，之後無敵；HP 歸零就死亡。回傳有沒有受傷 */
+export function hurtHero(h: HeroLogic, damage: number, dir: number): boolean {
+  if (h.invincible || h.invulnTicks > 0 || h.state === HeroState.Dead) return false;
+  h.hp = Math.max(0, h.hp - damage);
+  h.attack = null;
+  h.stateTicks = 0;
+  h.knockDir = dir;
+  h.state = h.hp === 0 ? HeroState.Dead : HeroState.Hurt;
+  h.invulnTicks = ticks(HERO.invulnMs);
+  return true;
+}
 
 export function tickHero(h: HeroLogic, input: HeroInput): HeroOutput {
   const t = ++h.tick;
@@ -159,6 +195,20 @@ export function tickHero(h: HeroLogic, input: HeroInput): HeroOutput {
   bufferPresses(h.buffer, f, t);
   h.vy = input.vy;
   const dir = direction(f);
+  if (h.invulnTicks > 0) h.invulnTicks--;
+
+  switch (h.state) {
+    case HeroState.Dead:
+      if (++h.stateTicks >= lengthOf(h.moves['hero/death'])) h.wantsRestart = true;
+      return { vx: 0, vy: null, gravity: true };
+    case HeroState.Hurt:
+      // 硬直的最後一個 tick 也照樣擊退，下一個 tick 才恢復行動
+      if (++h.stateTicks >= ticks(HERO.hurtMs)) {
+        h.state = input.onGround ? HeroState.Idle : HeroState.Air;
+        if (input.onGround) h.doubleJumped = h.airAttackUsed = false;
+      }
+      return { vx: h.knockDir * KNOCK_SPEED, vy: null, gravity: true };
+  }
 
   if (h.state === HeroState.Attack) {
     const out = attacking(h, input);
@@ -303,6 +353,10 @@ export function heroView(h: HeroLogic): HeroView {
       if (a.landed && frame?.phase === 'recovery') return jump('land');
       return { anim: `hero/${a.move}`, frame: frame?.file };
     }
+    case HeroState.Hurt:
+      return { anim: 'hero/hurt', frame: frameAt(h.moves['hero/hurt'], h.stateTicks)?.file ?? h.moves['hero/hurt'].frames?.at(-1)?.file };
+    case HeroState.Dead:
+      return { anim: 'hero/death', frame: frameAt(h.moves['hero/death'], h.stateTicks)?.file ?? h.moves['hero/death'].frames?.at(-1)?.file };
     case HeroState.Walk:
       return { anim: 'hero/walk' };
     case HeroState.Run:

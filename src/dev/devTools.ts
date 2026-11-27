@@ -23,11 +23,16 @@ export interface GameState {
     vy: number;
     /** 正在出的招（x1／x2／x3），沒有是 null */
     move: string | null;
+    hp: number;
     mp: number;
+    /** 作弊鍵 3 的無敵 */
+    invincible: boolean;
   };
   enemies: { x: number; y: number; state: string; facing: number; hp: number }[];
-  /** 飛行中的劍氣，x 是世界座標 */
-  waves: { x: number; y: number }[];
+  /** 飛行中的劍氣，x 是世界座標，fromX 是生成時的 x */
+  waves: { x: number; y: number; fromX: number }[];
+  /** 這一局生成過幾道劍氣 */
+  wavesSpawned: number;
   cameraX: number;
   /** 邏輯跑過的 tick 數 */
   tick: number;
@@ -46,7 +51,14 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
   cross.lineStyle(2, 0xe0218a);
   cross.lineBetween(-14, 0, 14, 0);
   cross.lineBetween(0, -14, 0, 14);
-  scene.events.on(Phaser.Scenes.Events.POST_UPDATE, () => cross.setPosition(hero.x, hero.y));
+  const follow = () => cross.setPosition(hero.x, hero.y);
+  scene.events.on(Phaser.Scenes.Events.POST_UPDATE, follow);
+  // 場景的事件監聽在重來時不會自動移除
+  scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => scene.events.off(Phaser.Scenes.Events.POST_UPDATE, follow));
+
+  // 作弊鍵 3：無敵切換。按鍵在場景關閉時連同監聽一起移除
+  const keys = scene.input.keyboard!;
+  keys.addKey(Phaser.Input.Keyboard.KeyCodes.THREE).on(Phaser.Input.Keyboard.Events.DOWN, () => (hero.logic.invincible = !hero.logic.invincible));
 
   window.__game = {
     getState: () => {
@@ -66,10 +78,13 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
           vx: hero.body.velocity.x,
           vy: hero.body.velocity.y,
           move: hero.logic.attack?.move ?? null,
+          hp: hero.logic.hp,
           mp: hero.logic.mp,
+          invincible: hero.logic.invincible,
         },
         enemies: scene.grunts.map((g) => ({ x: g.x, y: g.y, state: GruntState[g.logic.state], facing: g.logic.facing, hp: g.logic.hp })),
-        waves: scene.waves.map((w) => ({ x: w.sprite.x, y: w.sprite.y })),
+        waves: scene.waves.map((w) => ({ x: w.sprite.x, y: w.sprite.y, fromX: w.fromX })),
+        wavesSpawned: scene.wavesSpawned,
         cameraX: scene.cameras.main.scrollX,
         tick: hero.logic.tick,
       };

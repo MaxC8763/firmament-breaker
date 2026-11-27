@@ -36,6 +36,12 @@ export const HERO = {
   slideMs: 100,
   hpMax: 1000,
   mpMax: 300,
+  hurtMs: 300,
+  knockback: 120,
+  /** 被打後無敵多久（含硬直） */
+  invulnMs: 1000,
+  /** 受擊閃白多久 */
+  flashMs: 100,
 };
 
 /** 真空切劍氣：X3 判定開始時在主角前方生成，往前飛 */
@@ -70,6 +76,8 @@ export const GRUNT = {
   knockback: 40,
   /** 受擊閃白多久 */
   flashMs: 100,
+  /** 碰到主角造成的傷害 */
+  contactDamage: 50,
   /** 地圖上的位置：中段到右端 */
   spawnX: [1600, 2400, 3300],
 };

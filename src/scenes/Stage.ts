@@ -3,17 +3,20 @@ import { addMp, newAttack, strike, type AttackInstance, type AttackSpec, type Hi
 import { attackShape, overlaps, toWorld, type Box, type HitboxData } from '../combat/hitbox';
 import hitboxes from '../data/hitboxes.json';
 import type { Manifest } from '../data/manifest';
-import { GROUND_Y, GRUNT, SLASH, TICK_HZ, WAVE, WORLD_WIDTH, ticks } from '../data/tuning';
+import { GROUND_Y, GRUNT, HERO, SLASH, TICK_HZ, WAVE, WORLD_WIDTH, ticks } from '../data/tuning';
 import { installDevTools } from '../dev/devTools';
 import { Grunt } from '../entities/Grunt';
-import { GruntState, hurtGrunt } from '../entities/gruntLogic';
+import { gruntHarmful, GruntState, hurtGrunt } from '../entities/gruntLogic';
 import { Hero } from '../entities/Hero';
-import { activeFrame, type Attack } from '../entities/heroLogic';
+import { activeFrame, hurtHero, type Attack } from '../entities/heroLogic';
 import { noButtons, type Button, type InputFrame } from '../input/input';
 
 const HITBOXES = hitboxes as unknown as HitboxData;
 const SLASH_SPEC: AttackSpec = { maxHits: 1, intervalTicks: Infinity, damage: SLASH.damage, mp: SLASH.mp };
 const WAVE_SPEC: AttackSpec = { maxHits: WAVE.maxHits, intervalTicks: ticks(WAVE.intervalMs), damage: WAVE.damage, mp: WAVE.mp };
+
+/** HUD 的位置與大小（畫面座標） */
+const HUD = { x: 48, hpY: 40, hpWidth: 480, mpY: 84, mpWidth: 360 };
 
 /** 命中時發給開發模式的事件：(小兵, 結果, 這一段的傷害, 攻擊實例) */
 export const HIT_EVENT = 'hit';
@@ -27,6 +30,8 @@ const WALL = 24;
 /** 飛行中的劍氣 */
 interface Wave {
   sprite: Phaser.GameObjects.Sprite;
+  /** 生成時的 x */
+  fromX: number;
   dir: 1 | -1;
   age: number;
   attack: AttackInstance;
@@ -43,10 +48,18 @@ export class Stage extends Phaser.Scene {
   hero: Hero;
   grunts: Grunt[];
   waves: Wave[];
+  /** 這一局生成過幾道劍氣 */
+  wavesSpawned: number;
   /** 正在出的招和它的攻擊實例；換招時舊的實例結束 */
   private slash: { move: Attack; attack: AttackInstance } | null;
   /** 命中停頓還剩幾個 tick：期間邏輯與物理都不前進 */
   private hitstop: number;
+  /** 已經要求重來，這一幀剩下的 tick 不再跑 */
+  private restarting: boolean;
+  private hud: Phaser.GameObjects.Graphics;
+  private mpText: Phaser.GameObjects.Text;
+  /** HUD 上次畫的 HP、MP；沒變就不重畫 */
+  private hudShown: string;
   private keys: Record<Button, Phaser.Input.Keyboard.Key>;
   /** 還沒累積滿一個 tick 的時間 */
   private elapsed: number;
@@ -61,8 +74,11 @@ export class Stage extends Phaser.Scene {
     this.elapsed = 0;
     this.pressed = noButtons();
     this.waves = [];
+    this.wavesSpawned = 0;
     this.slash = null;
     this.hitstop = 0;
+    this.restarting = false;
+    this.hudShown = '';
   }
 
   create() {
@@ -75,6 +91,14 @@ export class Stage extends Phaser.Scene {
     this.grunts = GRUNT.spawnX.map((x) => new Grunt(this, manifest, x));
     this.hero = new Hero(this, manifest);
     this.hero.show();
+
+    // HUD 畫在關卡場景裡、不跟鏡頭捲動；死亡重來時跟著場景重畫
+    this.hud = this.add.graphics().setScrollFactor(0).setDepth(900);
+    this.mpText = this.add
+      .text(HUD.x + HUD.mpWidth + 16, HUD.mpY - 6, '', { fontFamily: 'sans-serif', fontSize: '26px', color: '#ffffff', stroke: '#1b1b1b', strokeThickness: 5 })
+      .setScrollFactor(0)
+      .setDepth(900);
+    this.drawHud();
 
     // 鏡頭只水平跟隨
     this.cameras.main.setBounds(0, 0, WORLD_WIDTH, this.scale.height);
@@ -96,7 +120,7 @@ export class Stage extends Phaser.Scene {
     for (const b of Object.keys(KEYS) as Button[]) held[b] = this.keys[b].isDown;
 
     this.elapsed += Math.min(delta, MAX_DELTA_MS);
-    while (this.elapsed >= TICK_MS) {
+    while (this.elapsed >= TICK_MS && !this.restarting) {
       this.elapsed -= TICK_MS;
       if (this.hitstop > 0) {
         this.hitstop--;
@@ -110,6 +134,7 @@ export class Stage extends Phaser.Scene {
     }
     this.hero.show();
     for (const g of this.grunts) g.show();
+    this.drawHud();
   }
 
   /** 一個邏輯 tick：決策 → 物理一步 → 發射物 → 命中 */
@@ -120,8 +145,46 @@ export class Stage extends Phaser.Scene {
     if (out.spawnWave) this.spawnWave();
     this.moveWaves();
     this.resolveHits();
+    this.contactDamage();
     for (const g of this.grunts) if (g.logic.state === GruntState.Gone) g.destroy();
     this.grunts = this.grunts.filter((g) => g.logic.state !== GruntState.Gone);
+    // 死亡動畫播完：整個場景重來，HP、MP 回到關卡開始的值，小兵也重置
+    if (this.hero.logic.wantsRestart) {
+      this.restarting = true;
+      this.scene.restart();
+    }
+  }
+
+  /** 小兵碰到主角的 hurtbox 就造成傷害；硬直中、待死亡的小兵不算 */
+  private contactDamage() {
+    const hero = this.hero;
+    const box = toWorld(hitboxes.hurtbox, hero.x, hero.y, hero.logic.facing);
+    for (const g of this.grunts) {
+      if (!gruntHarmful(g.logic) || !overlaps(box, g.hurtbox())) continue;
+      if (hurtHero(hero.logic, GRUNT.contactDamage, Math.sign(hero.x - g.x) || -hero.logic.facing)) break;
+    }
+  }
+
+  /** 左上角的 HP 條（不顯示數字）與 MP 條（數字＋每 100 一條刻度） */
+  private drawHud() {
+    const { hp, mp } = this.hero.logic;
+    const key = `${hp}/${mp}`;
+    if (key === this.hudShown) return;
+    this.hudShown = key;
+    const g = this.hud.clear();
+    const bar = (y: number, w: number, h: number, ratio: number, color: number) => {
+      g.fillStyle(0x1b1b1b).fillRect(HUD.x - 4, y - 4, w + 8, h + 8);
+      g.fillStyle(0x4a4a4a).fillRect(HUD.x, y, w, h);
+      g.fillStyle(color).fillRect(HUD.x, y, w * ratio, h);
+    };
+    bar(HUD.hpY, HUD.hpWidth, 26, hp / HERO.hpMax, 0xe0464e);
+    bar(HUD.mpY, HUD.mpWidth, 18, mp / HERO.mpMax, 0x3e8ef0);
+    g.lineStyle(3, 0x1b1b1b);
+    for (let v = 100; v < HERO.mpMax; v += 100) {
+      const x = HUD.x + (HUD.mpWidth * v) / HERO.mpMax;
+      g.lineBetween(x, HUD.mpY, x, HUD.mpY + 18);
+    }
+    this.mpText.setText(`${mp} / ${HERO.mpMax}`);
   }
 
   /** 斬擊在判定格打小兵；劍氣整段飛行都會打 */
@@ -164,7 +227,8 @@ export class Stage extends Phaser.Scene {
       .sprite(this.hero.x + dir * WAVE.spawnX, this.hero.y + WAVE.spawnY, 'art')
       .setFlipX(dir < 0)
       .play('effects/x3_wave');
-    this.waves.push({ sprite, dir, age: 0, attack: newAttack(WAVE_SPEC) });
+    this.waves.push({ sprite, fromX: sprite.x, dir, age: 0, attack: newAttack(WAVE_SPEC) });
+    this.wavesSpawned++;
   }
 
   /** 劍氣等速往前飛，lifeMs 後消失 */

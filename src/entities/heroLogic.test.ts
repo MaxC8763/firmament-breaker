@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { ArtGroup } from '../data/manifest';
 import { HERO, TICK_HZ, ticks } from '../data/tuning';
 import { frameOf, type Button } from '../input/input';
-import { activeFrame, HeroState, heroView, newHero, tickHero, type HeroLogic, type HeroMoves } from './heroLogic';
+import { activeFrame, HeroState, heroView, hurtHero, newHero, tickHero, type HeroLogic, type HeroMoves } from './heroLogic';
 
 // 和佔位圖同樣的格數；測試只依賴這份，不讀美術檔
 const group = (frames: ArtGroup['frames']): ArtGroup => ({ canvas: [768, 512], fps: 12, loop: false, frames });
@@ -39,6 +39,17 @@ const MOVES: HeroMoves = {
     { file: 'x3_02', hold: 1, phase: 'active' },
     { file: 'x3_03', hold: 2, phase: 'recovery' },
     { file: 'x3_04', hold: 2, phase: 'recovery' },
+  ]),
+  'hero/hurt': group([
+    { file: 'hurt_00', hold: 2 },
+    { file: 'hurt_01', hold: 2 },
+  ]),
+  // 2＋2＋2＋6 格＝60 tick
+  'hero/death': group([
+    { file: 'death_00', hold: 2 },
+    { file: 'death_01', hold: 2 },
+    { file: 'death_02', hold: 2 },
+    { file: 'death_03', hold: 6 },
   ]),
 };
 const X1 = { startup: 5, active: 10, recovery: 10 };
@@ -366,5 +377,63 @@ describe('空中 X', () => {
     expect(landedView).toBe('jump_04');
     expect(w.h.state).toBe(HeroState.Idle);
     expect(w.onGround).toBe(true);
+  });
+});
+
+describe('主角受擊與死亡', () => {
+  test('受擊硬直 300 ms、擊退 120 px，期間不能行動', () => {
+    const w = new World();
+    expect(hurtHero(w.h, 50, -1)).toBe(true);
+    expect(w.h.hp).toBe(HERO.hpMax - 50);
+    let n = 0;
+    while (w.h.state === HeroState.Hurt) {
+      w.step(['right'], ['attack']);
+      n++;
+    }
+    expect(n).toBe(ticks(HERO.hurtMs));
+    expect(w.x).toBeCloseTo(-HERO.knockback, 0);
+    expect(w.h.state).toBe(HeroState.Idle);
+  });
+
+  test('被打會打斷出招', () => {
+    const w = new World();
+    w.step([], ['attack']);
+    hurtHero(w.h, 50, -1);
+    expect(w.h.attack).toBeNull();
+    expect(w.h.state).toBe(HeroState.Hurt);
+  });
+
+  test('被打後無敵 1000 ms：期間不再受傷，之後才會', () => {
+    const w = new World();
+    hurtHero(w.h, 50, 1);
+    for (let i = 1; i < ticks(HERO.invulnMs); i++) {
+      w.step();
+      expect(hurtHero(w.h, 50, 1)).toBe(false);
+    }
+    w.step();
+    expect(hurtHero(w.h, 50, 1)).toBe(true);
+    expect(w.h.hp).toBe(HERO.hpMax - 100);
+  });
+
+  test('無敵作弊開著時不受傷', () => {
+    const w = new World();
+    w.h.invincible = true;
+    expect(hurtHero(w.h, 50, 1)).toBe(false);
+    expect(w.h.hp).toBe(HERO.hpMax);
+  });
+
+  test('HP 歸零進入死亡，播完死亡動畫才要求重來', () => {
+    const w = new World();
+    w.h.hp = 50;
+    hurtHero(w.h, 50, 1);
+    expect(w.h.state).toBe(HeroState.Dead);
+    for (let i = 1; i < 60; i++) {
+      w.step([], ['jump']);
+      expect(w.h.wantsRestart).toBe(false);
+    }
+    expect(heroView(w.h).frame).toBe('death_03');
+    w.step();
+    expect(w.h.wantsRestart).toBe(true);
+    expect(w.h.state).toBe(HeroState.Dead);
   });
 });
