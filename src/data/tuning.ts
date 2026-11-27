@@ -34,6 +34,8 @@ export const HERO = {
   maxFallSpeed: 1500,
   /** 跑＋X：滑行多久減速到 0 */
   slideMs: 100,
+  hpMax: 1000,
+  mpMax: 300,
 };
 
 /** 真空切劍氣：X3 判定開始時在主角前方生成，往前飛 */
