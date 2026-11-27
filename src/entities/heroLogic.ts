@@ -266,7 +266,7 @@ function slide(h: HeroLogic, ms: number) {
   h.slideDecel = HERO.runSpeed / ticks(ms);
 }
 
-/** 出招：面向鎖定、不能自己左右移動（地面的滑行照樣繼續）；空中招在預備＋判定期間滯空 */
+/** 出招：面向鎖定、不能自己左右移動（地面的滑行、X2／X3 往前踏照樣有）；空中招在預備＋判定期間滯空 */
 function startAttack(h: HeroLogic, move: XMove, air: boolean): HeroOutput {
   h.state = HeroState.Attack;
   h.landTicks = 0;
@@ -300,12 +300,20 @@ function attacking(h: HeroLogic, input: HeroInput): HeroOutput | null {
   return null;
 }
 
+/** 預備期間的 tick 數 */
+const startupTicks = (g: ArtGroup) =>
+  (g.frames ?? []).filter((f) => f.phase === 'startup').reduce((n, f) => n + f.hold, 0) * ticksPerHold(g);
+
 function attackOutput(h: HeroLogic): HeroOutput {
   const a = h.attack!;
-  const frame = frameAt(h.moves[`hero/${a.move}`], a.t);
+  const g = h.moves[`hero/${a.move}`];
+  const frame = frameAt(g, a.t);
   const spawnWave = a.move === 'x3' && frame?.phase === 'active' && frameAt(h.moves['hero/x3'], a.t - 1)?.phase !== 'active';
-  if (a.air && !a.landed && frame?.phase !== 'recovery') return { vx: 0, vy: 0, gravity: false, spawnWave };
-  return { vx: h.facing * h.slideV, vy: null, gravity: true, spawnWave };
+  // X2、X3 在預備期間往前踏，距離照預備的格數換成速度；空中照樣滯空，只多了水平位移
+  const lunge = frame?.phase === 'startup' ? (HERO.lunge[a.move] / startupTicks(g)) * TICK_HZ : 0;
+  if (a.air && !a.landed && frame?.phase !== 'recovery') return { vx: h.facing * lunge, vy: 0, gravity: false, spawnWave };
+  // 地面的滑行和往前踏重疊時，兩個速度相加
+  return { vx: h.facing * (h.slideV + lunge), vy: null, gravity: true, spawnWave };
 }
 
 /** 判定中的那一格：招式、是不是空中招、格名；不在判定期間是 null */

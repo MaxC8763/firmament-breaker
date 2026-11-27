@@ -498,7 +498,7 @@ describe('停止奔跑的滑行', () => {
     expect(w.h.state).toBe(HeroState.Walk);
   });
 
-  test('滑行中出 X：出招照樣往前滑到滑行結束，接下一招也不中斷', () => {
+  test('滑行中出 X：出招照樣往前滑到滑行結束（接下一招也不中斷，見「滑行和往前踏重疊」）', () => {
     const w = new World();
     runRight(w);
     w.step();
@@ -506,7 +506,7 @@ describe('停止奔跑的滑行', () => {
     expect(w.h.attack?.move).toBe('x1');
     expect(out.vx).toBeGreaterThan(0);
     const speeds: number[] = [];
-    for (let i = 0; i < 20; i++) speeds.push(w.step([], i === 0 ? ['attack'] : []).vx);
+    for (let i = 0; i < 20; i++) speeds.push(w.step().vx);
     // 從放開算起，一共滑 brakeMs，之後出招不再移動
     const moving = speeds.filter((v) => v > 0).length;
     expect(moving).toBe(ticks(HERO.brakeMs) - 2);
@@ -535,5 +535,87 @@ describe('停止奔跑的滑行', () => {
     v.step();
     expect(v.step([], ['jump']).vx).toBe(0);
     expect(v.h.slideV).toBe(0);
+  });
+});
+
+describe('X2、X3 往前踏', () => {
+  /** 按著 held 一路接到 X3 出完，記下每一招期間的水平位移 */
+  function comboMoves(w: World, held: Button[] = []) {
+    const moved: Record<string, number> = { x1: 0, x2: 0, x3: 0 };
+    const x = { from: w.x };
+    for (let i = 0; i < 200; i++) {
+      const before = w.x;
+      w.step(held, i % 4 === 0 && w.h.attack?.move !== 'x3' ? ['attack'] : []);
+      const move = w.h.attack?.move;
+      if (!move) break;
+      moved[move] += w.x - before;
+    }
+    return { moved, total: w.x - x.from };
+  }
+
+  test('X2 在預備期間往前 30 px、X3 往前 60 px，X1 不動', () => {
+    const w = new World();
+    w.step([], ['attack']);
+    const { moved } = comboMoves(w);
+    expect(moved.x1).toBeCloseTo(0);
+    expect(moved.x2).toBeCloseTo(HERO.lunge.x2);
+    expect(moved.x3).toBeCloseTo(HERO.lunge.x3);
+    expect(HERO.lunge.x3).toBeGreaterThan(HERO.lunge.x2);
+  });
+
+  test('面向左時往左踏', () => {
+    const w = new World();
+    w.step([], ['left']);
+    w.step([], ['attack']);
+    const { moved } = comboMoves(w);
+    expect(moved.x2).toBeCloseTo(-HERO.lunge.x2);
+    expect(moved.x3).toBeCloseTo(-HERO.lunge.x3);
+  });
+
+  test('空中的 X2、X3 也往前踏，期間照樣滯空', () => {
+    const w = new World();
+    w.step(['jump'], ['jump']);
+    for (let i = 0; i < 8; i++) w.step(['jump']);
+    w.step(['jump'], ['attack']);
+    expect(w.h.attack).toMatchObject({ move: 'x1', air: true });
+    let checked = 0;
+    const moved: Record<string, number> = { x1: 0, x2: 0, x3: 0 };
+    for (let i = 0; i < 200 && w.h.attack; i++) {
+      const before = w.x;
+      const out = w.step(['jump'], i % 4 === 0 && w.h.attack.move !== 'x3' ? ['attack'] : []);
+      const a = w.h.attack;
+      if (!a) break;
+      moved[a.move] += w.x - before;
+      if (activeFrame(w.h) === null && heroView(w.h).frame?.endsWith('_00')) {
+        // 預備格：滯空
+        expect(out).toMatchObject({ vy: 0, gravity: false });
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+    expect(moved.x1).toBeCloseTo(0);
+    expect(moved.x2).toBeCloseTo(HERO.lunge.x2);
+    expect(moved.x3).toBeCloseTo(HERO.lunge.x3);
+  });
+
+  test('滑行和往前踏重疊時，兩個速度相加', () => {
+    // X1 只有預備、判定各 1 格：X2 在滑行結束前就開始
+    const short = {
+      ...MOVES,
+      'hero/x1': group([
+        { file: 'x1_00', hold: 1, phase: 'startup' },
+        { file: 'x1_01', hold: 1, phase: 'active' },
+      ]),
+    };
+    const w = new World(short);
+    runRight(w);
+    w.step();
+    w.step([], ['attack']);
+    w.step([], ['attack']);
+    let out = w.step();
+    while (w.h.attack?.move !== 'x2') out = w.step();
+    expect(w.h.slideV).toBeGreaterThan(0);
+    // X2 的預備是 1 格（5 tick）
+    expect(out.vx).toBeCloseTo(w.h.slideV + (HERO.lunge.x2 / 5) * TICK_HZ);
   });
 });
