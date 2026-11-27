@@ -1,6 +1,7 @@
-// 美術對齊工具：畫出每一格和腳底、地平線、佔位圖、判定框的關係（Canvas 2D，不靠遊戲引擎）
-import { checkFrame, worst } from './checks.js';
-import { drawCutin, drawDialog, drawGame, drawShape } from './preview.js';
+// 美術對齊工具：畫出每一格和腳底、地平線、佔位圖、判定框的關係（Canvas 2D，不靠遊戲引擎）；判定框可以直接拖拉、打數字修改
+import { bodyWarning, checkFrame, worst } from './checks.js';
+import { boxesOf, drag, fieldValue, fieldsOf, get, handlesOf, hitTest, setField, toLocal } from './edit.js';
+import { drawCutin, drawDialog, drawGame, drawHandles, drawShape } from './preview.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('stage');
@@ -12,6 +13,7 @@ const state = {
   manifest: null, text: '', hitboxes: null,
   mode: 'action', expression: 'normal',
   group: null, index: 0, playing: false, flipped: false, zoom: 1, drawn: null,
+  selected: null, dragging: null, // selected 記框的角色，換格時選取跟著角色走
 };
 
 const animGroups = () => Object.keys(state.manifest.groups).filter((g) => state.manifest.groups[g].frames);
@@ -154,21 +156,33 @@ function draw() {
   if (!state.manifest) return;
   for (const b of document.querySelectorAll('[data-mode]')) b.classList.toggle('on', b.dataset.mode === state.mode);
   $('exprs').hidden = state.mode !== 'portrait';
+  $('edit').hidden = state.mode !== 'action';
   if (state.mode === 'portrait') drawPortraitMode();
   else if (state.mode === 'cutin') drawCutinMode();
   else drawActionMode();
 }
 
+// 框的顏色與名稱；攻擊框、長條劍氣在 active 格實心、其他格虛線，發射物一律實心
+const LOOK = {
+  body: { color: '#2b9348', label: () => 'body（物理）' },
+  hurtbox: { color: '#2f6fde', label: () => 'hurtbox（被打）' },
+  attack: { color: '#e5383b', label: (path) => `攻擊框 ${path.at(-1)}` },
+  beam: { color: '#f08c00', label: () => '長條劍氣 a_beam' },
+  projectile: { color: '#e5383b', label: (path) => `發射物 ${path.at(-1)}` },
+};
+
+/** 這一格畫出來、能改的框；「判定框」沒勾就沒有 */
 function boxesFor(f) {
-  const hb = state.hitboxes;
-  if (!hb || !$('boxes').checked) return [];
-  const name = state.group.split('/').pop();
-  const hero = state.group.startsWith('hero/');
-  const out = hero ? [{ shape: hb.hurtbox, color: '#2f6fde', style: 'line' }] : [];
-  const attack = hero ? hb.attacks[hb.byAction[name]] : hb.projectiles?.[name];
-  if (attack) out.push({ shape: attack, color: '#e5383b', style: !hero || f.phase === 'active' ? 'fill' : 'dash' });
-  return out;
+  if (!state.hitboxes || !$('boxes').checked || state.mode !== 'action' || !f) return [];
+  return boxesOf(state.hitboxes, state.group).map((b) => ({
+    ...b,
+    color: LOOK[b.role].color,
+    style: b.role === 'body' || b.role === 'hurtbox' ? 'line' : b.role === 'projectile' || f.phase === 'active' ? 'fill' : 'dash',
+  }));
 }
+const currentBoxes = () => boxesFor(frames()[state.index]);
+const selectedBox = () => currentBoxes().find((b) => b.role === state.selected);
+const setShape = (path, shape) => (get(state.hitboxes, path.slice(0, -1))[path.at(-1)] = shape);
 
 function drawActionMode() {
   const m = meta();
@@ -200,6 +214,8 @@ function drawActionMode() {
   ctx.globalAlpha = 1;
   const boxes = boxesFor(f);
   for (const b of boxes) drawShape(ctx, b.shape, px, py, b.color, b.style);
+  const sel = boxes.find((b) => b.role === state.selected);
+  if (sel) drawHandles(ctx, handlesOf(sel.shape), px, py, t);
   ctx.restore();
 
   // 參考線：地平線（腳底那條橫線的正下方）、中線、畫布邊框、腳底十字；寬度固定 1 個螢幕像素
@@ -219,17 +235,104 @@ function drawActionMode() {
   ctx.strokeRect(t / 2, t / 2, W - t, H - t);
   cross(px, py, t);
 
-  const attack = state.hitboxes && (state.hitboxes.attacks[state.hitboxes.byAction[state.group.split('/').pop()]] ?? state.hitboxes.attacks.x_slash);
+  const attack = state.hitboxes && (boxesOf(state.hitboxes, state.group).find((b) => b.role === 'attack')?.shape ?? state.hitboxes.attacks.x_slash);
   const reach = attack ? (attack.type === 'circle' ? attack.cx + attack.r : attack.x + attack.w) : 200;
   drawGame(pctx, PREVIEW_SCALE, { img: main, canvas: m.canvas, pivot: [px, py], flipped: state.flipped, boxes, reach });
 
   state.drawn = main && (!f.fx || fx || !$('fx').checked) ? k : null;
+  const body = state.group.startsWith('hero/') && bodyWarning(state.hitboxes);
   info([
     `${state.group}　第 ${state.index + 1}／${list.length} 格　${f.file}　來源 ${img?.source ?? '沒有圖'}　hold ${f.hold}` +
       `${f.phase ? '　' + f.phase : ''}${f.grounded ? `　貼地（離地平線 ${img?.ground ?? '?'} px）` : ''}${state.flipped ? '　面向左' : ''}`,
     ...warnings.map((w) => ({ level: w.level === 'warn' ? 'warn' : 'bad', text: `⚠ ${w.text}` })),
+    ...(body ? [{ level: 'warn', text: `⚠ ${body}` }] : []),
   ]);
+  renderEdit(boxes);
 }
+
+// ---------- 編輯面板：這一格的框清單、選中的框的數字欄、共用框提示 ----------
+function renderEdit(boxes) {
+  const sel = boxes.find((b) => b.role === state.selected);
+  // 框或選取換了才重建；拖拉時只更新數字，正在打字的欄位不動
+  const key = `${boxes.map((b) => b.path.join('.')).join('|')}#${sel ? sel.path.join('.') + fieldsOf(sel.shape).length : ''}`;
+  if ($('edit').dataset.key !== key) {
+    $('edit').dataset.key = key;
+    $('boxlist').replaceChildren(
+      ...boxes.map((b) => {
+        const button = document.createElement('button');
+        button.dataset.role = b.role;
+        button.classList.toggle('on', b === sel);
+        button.append(Object.assign(document.createElement('span'), { className: 'sw', style: `background: ${b.color}` }), LOOK[b.role].label(b.path));
+        button.onclick = () => {
+          state.selected = b.role;
+          draw();
+        };
+        return button;
+      }),
+    );
+    $('fields').replaceChildren(...(sel ? fieldsOf(sel.shape).map(([field, text]) => numberField(field, text)) : []));
+  }
+  for (const input of $('fields').querySelectorAll('input'))
+    if (sel && input !== document.activeElement) input.value = fieldValue(sel.shape, input.dataset.field);
+  const hint = boxes.length ? '點畫布上的框選取：拖框內移動，拖白色控制點改大小' : '';
+  const shared = sel?.role === 'attack' ? `共用框 ${sel.path.at(-1)}：${usersOf(sel.path.at(-1)).join('、')} 的判定格都用它` : '';
+  $('shared').textContent = sel ? shared : hint;
+}
+
+const usersOf = (attack) => Object.keys(state.hitboxes.byAction).filter((a) => state.hitboxes.byAction[a] === attack);
+
+function numberField(field, text) {
+  const input = Object.assign(document.createElement('input'), { type: 'number', step: 1 });
+  input.dataset.field = field;
+  // 打到合格的值才套用；離開欄位時換回目前的值（打到一半不合格的會被丟掉）
+  input.oninput = () => {
+    const box = selectedBox();
+    const next = box && setField(box.shape, field, input.valueAsNumber);
+    if (!next) return;
+    setShape(box.path, next);
+    draw();
+  };
+  input.onchange = () => {
+    const box = selectedBox();
+    if (box) input.value = fieldValue(box.shape, field);
+  };
+  const label = document.createElement('label');
+  label.append(`${text} `, input);
+  return label;
+}
+
+// ---------- 拖拉：按在已選框的控制點上改大小，按在框內移動，按在空白處取消選取 ----------
+function localPoint(e) {
+  const [W, H] = meta().canvas;
+  return toLocal([e.offsetX, e.offsetY], { pivot: meta().pivot ?? [W / 2, H / 2], zoom: state.zoom, flipped: state.flipped });
+}
+const grab = (e) => hitTest(currentBoxes(), localPoint(e), { selected: state.selected, tolerance: 6 / state.zoom });
+const editing = () => state.manifest && state.mode === 'action' && meta()?.frames;
+
+canvas.addEventListener('pointerdown', (e) => {
+  if (!editing()) return;
+  const hit = grab(e);
+  state.selected = hit?.role ?? null;
+  state.playing = false;
+  const box = hit && selectedBox();
+  if (box) {
+    state.dragging = { handle: hit.handle, start: localPoint(e), shape: box.shape, path: box.path };
+    canvas.setPointerCapture(e.pointerId);
+  }
+  draw();
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!editing()) return;
+  const d = state.dragging;
+  if (!d) {
+    const hit = grab(e);
+    canvas.style.cursor = !hit ? '' : hit.handle === 'move' ? 'move' : 'crosshair';
+    return;
+  }
+  setShape(d.path, drag(d.shape, d.handle, d.start, localPoint(e)));
+  draw();
+});
+for (const type of ['pointerup', 'pointercancel']) canvas.addEventListener(type, () => (state.dragging = null));
 
 function drawPortraitMode() {
   const m = meta('portrait');
@@ -300,6 +403,7 @@ function togglePlay() {
 
 addEventListener('keydown', (e) => {
   if (!state.manifest || state.mode !== 'action') return;
+  if (e.target instanceof HTMLInputElement && e.target.type === 'number') return; // 在數字欄打字時，按鍵留給欄位
   if (e.code === 'Space') togglePlay();
   else if (e.code === 'ArrowRight') step(1);
   else if (e.code === 'ArrowLeft') step(-1);
@@ -326,14 +430,16 @@ window.__align = {
   getState() {
     const f = state.manifest && frames()[state.index];
     const img = f && state.manifest.images[keyOf(state.group, f)];
-    let warningCount = 0;
+    let warningCount = bodyWarning(state.hitboxes) ? 1 : 0;
     for (const g of state.manifest ? animGroups() : [])
       for (const fr of state.manifest.groups[g].frames) warningCount += checkFrame(state.manifest, g, fr).length;
+    const sel = state.manifest && selectedBox();
     return {
       mode: state.mode, expression: state.expression, group: state.group, index: state.index,
       playing: state.playing, flipped: state.flipped, zoom: state.zoom, drawn: state.drawn,
       source: img?.source ?? null, ground: img?.ground ?? null,
       warnings: f ? checkFrame(state.manifest, state.group, f) : [], warningCount,
+      selected: sel ? { role: sel.role, path: sel.path.join('.'), shape: structuredClone(sel.shape) } : null,
     };
   },
 };

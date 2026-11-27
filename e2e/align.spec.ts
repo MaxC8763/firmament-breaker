@@ -85,3 +85,29 @@ test('手繪往下移了 20 px（2x）：標成手繪、顯示低於地平線 10
   await expect(page.locator('summary[data-group="hero/idle"] .count')).toHaveText('手繪 1／4');
   await expect(page.locator('#info .warn')).toContainText('低於地平線 10 px');
 });
+
+test.describe('編輯判定框', () => {
+  // 放大 2× 的畫布比預設視窗寬
+  test.use({ viewport: { width: 1920, height: 1080 } });
+
+  test('放大 2× 時拖 x_slash 的右上角往右 40 個螢幕像素：w 從 190 變 210', async ({ page }) => {
+    await page.goto(ALIGN_URL);
+    await page.locator('summary[data-group="hero/x1"]').click();
+    await page.keyboard.press('ArrowRight');
+    await drawn(page, 'hero/x1/x1_01');
+    await page.locator('[data-zoom="2"]').click();
+    const box = (await page.locator('#stage').boundingBox())!;
+    // 1x、相對腳底 (384, 492) 的點 → 螢幕座標
+    const at = (x: number, y: number) => [box.x + (384 + x) * 2, box.y + (492 + y) * 2] as const;
+
+    await page.mouse.click(...at(150, -125));
+    expect((await alignState(page)).selected).toMatchObject({ role: 'attack', path: 'attacks.x_slash' });
+    const [x, y] = at(210, -250);
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 40, y, { steps: 4 });
+    await page.mouse.up();
+    expect((await alignState(page)).selected.shape).toEqual({ type: 'rect', x: 20, y: -250, w: 210, h: 250 });
+    await expect(page.locator('#fields input[data-field="w"]')).toHaveValue('210');
+  });
+});

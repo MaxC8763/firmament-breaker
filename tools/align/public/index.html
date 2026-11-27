@@ -23,6 +23,13 @@
       #info .warn { color: #8a6500; background: #fff3c4; }
       #info .bad { color: #fff; background: #e5383b; }
       canvas { display: block; box-shadow: 0 0 0 1px #ccd3dc; }
+      #edit { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin-bottom: 8px; min-height: 24px; }
+      #boxlist button { margin-right: 3px; }
+      #boxlist button.on { outline: 2px solid #3366ff; }
+      #boxlist .sw { display: inline-block; width: 10px; height: 10px; margin-right: 4px; vertical-align: -1px; }
+      #fields label { margin-right: 6px; }
+      #fields input { width: 64px; }
+      #shared { color: #555; }
     </style>
   </head>
   <body>
@@ -39,6 +46,11 @@
         <label><input type="checkbox" id="fx" checked /> 特效</label>
         <label><input type="checkbox" id="boxes" checked /> 判定框</label>
         <label><input type="checkbox" id="onion" /> 前一格（洋蔥皮）</label>
+      </div>
+      <div id="edit">
+        <span id="boxlist"></span>
+        <span id="fields"></span>
+        <span id="shared"></span>
       </div>
       <canvas id="stage"></canvas>
       <div id="info"></div>

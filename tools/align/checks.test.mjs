@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { checkFrame, worst } from './public/checks.js';
+import { bodyWarning, checkFrame, worst } from './public/checks.js';
 
 const manifest = (img, errors = []) => ({ images: img ? { 'hero/a/a_00': img } : {}, errors });
 const frame = { file: 'a_00', grounded: true };
@@ -20,4 +20,12 @@ test('碰到畫布邊緣標紅、管線的錯誤（含這格的特效圖）照�
   expect(worst(got)).toBe('bad');
   expect(worst([{ level: 'warn', text: '' }])).toBe('warn');
   expect(worst([])).toBeNull();
+});
+
+test('body 下緣不在腳底時警告：主角在遊戲裡會陷進地面或浮空', () => {
+  const hb = (y, h) => ({ body: { type: 'rect', x: -30, y, w: 60, h } });
+  expect(bodyWarning(hb(-200, 200))).toBeNull();
+  expect(bodyWarning(hb(-200, 195))).toBe('body 下緣在腳底上方 5 px：主角在遊戲裡會陷進地面');
+  expect(bodyWarning(hb(-200, 203))).toBe('body 下緣在腳底下方 3 px：主角在遊戲裡會浮空');
+  expect(bodyWarning({})).toBeNull();
 });
