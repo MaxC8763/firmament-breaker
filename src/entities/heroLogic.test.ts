@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { ArtGroup } from '../data/manifest';
 import { GRAVITY, HERO, TICK_HZ, ticks } from '../data/tuning';
 import { frameOf, type Button } from '../input/input';
-import { activeFrame, HeroState, heroView, hurtHero, newHero, tickHero, type HeroLogic, type HeroMoves } from './heroLogic';
+import { activeFrame, HeroState, heroView, hurtHero, launchSpeed, newHero, tickHero, type HeroLogic, type HeroMoves } from './heroLogic';
 
 // 和佔位圖同樣的格數；測試只依賴這份，不讀美術檔
 const group = (frames: ArtGroup['frames']): ArtGroup => ({ canvas: [768, 512], fps: 12, loop: false, frames });
@@ -71,9 +71,13 @@ class World {
   wallLeft = -Infinity;
   wallRight = Infinity;
   blocked = { left: false, right: false };
+  /** 腳下能站的高度：0＝地面，負的＝單向平台；改回 0 就是平台到了盡頭 */
+  floorY = 0;
 
   step(held: Button[] = [], pressed: Button[] = []) {
-    const out = tickHero(this.h, { frame: frameOf(held, pressed), onGround: this.onGround, vy: this.vy, blocked: this.blocked });
+    const onPlatform = this.onGround && this.floorY < 0;
+    const out = tickHero(this.h, { frame: frameOf(held, pressed), onGround: this.onGround, onPlatform, vy: this.vy, blocked: this.blocked });
+    if (out.dropThrough) this.floorY = 0;
     if (out.vy !== null) this.vy = out.vy;
     if (out.gravity) this.vy += HERO.gravity / TICK_HZ;
     this.vy = Math.max(-HERO.maxFallSpeed, Math.min(HERO.maxFallSpeed, this.vy));
@@ -82,8 +86,8 @@ class World {
     this.blocked = { left: this.x < this.wallLeft, right: this.x > this.wallRight };
     this.x = Math.min(this.wallRight, Math.max(this.wallLeft, this.x));
     this.y += this.vy / TICK_HZ;
-    if (this.y >= 0) {
-      this.y = 0;
+    if (this.y >= this.floorY) {
+      this.y = this.floorY;
       this.vy = 0;
       this.onGround = true;
     } else {
@@ -723,5 +727,87 @@ describe('撞牆終止滑行', () => {
     const out = w.step();
     expect(w.h.state).toBe(HeroState.Slide);
     expect(out.vx).toBeGreaterThan(0);
+  });
+});
+
+describe('單向平台與 coyote time', () => {
+  /** 站在離地 height 的平台上 */
+  const standOn = (height = 200) => {
+    const w = new World();
+    w.y = w.floorY = -height;
+    idle(w, 2);
+    return w;
+  };
+  /** 在平台上往右走，走到平台盡頭：物理已經掉出邊緣，邏輯還沒看到 */
+  const leaveEdge = () => {
+    const w = standOn();
+    w.step(['right']);
+    w.floorY = 0;
+    w.step(['right']);
+    return w;
+  };
+  const JUMP = launchSpeed(HERO.jumpHeight, HERO.gravity);
+
+  test('站在單向平台上 ↓＋Z：往下穿過、不起跳', () => {
+    const w = standOn();
+    expect(w.step(['down'], ['jump']).dropThrough).toBe(true);
+    expect(w.h.state).toBe(HeroState.Air);
+    w.untilLanded(['down']);
+    expect(w.y).toBe(0);
+    expect(w.top).toBeGreaterThanOrEqual(-200);
+  });
+
+  test('在地面 ↓＋Z 照常起跳', () => {
+    const w = new World();
+    const out = w.step(['down', 'jump'], ['jump']);
+    expect(out.dropThrough).toBeUndefined();
+    expect(out.vy).toBe(-JUMP);
+    w.untilLanded(['jump']);
+    expect(Math.abs(-w.top - HERO.jumpHeight)).toBeLessThanOrEqual(1);
+  });
+
+  test('走出平台邊緣就進入空中往下掉', () => {
+    const w = leaveEdge();
+    w.step(['right']);
+    expect(w.h.state).toBe(HeroState.Air);
+    expect(w.vy).toBeGreaterThan(0);
+    w.untilLanded(['right']);
+    expect(w.y).toBe(0);
+    expect(w.h.state).toBe(HeroState.Walk);
+  });
+
+  test('走出平台邊緣後 100 ms 內按 Z 是一般跳，之後是二段跳', () => {
+    /** 掉出邊緣後的第 k 個 tick 按 Z */
+    const jumpAt = (k: number) => {
+      const w = leaveEdge();
+      idle(w, k - 1);
+      const out = w.step([], ['jump']);
+      return { vy: out.vy, doubleJumped: w.h.doubleJumped };
+    };
+    const n = ticks(HERO.coyoteMs);
+    expect(jumpAt(1)).toEqual({ vy: -JUMP, doubleJumped: false });
+    expect(jumpAt(n)).toEqual({ vy: -JUMP, doubleJumped: false });
+    expect(jumpAt(n + 1)).toEqual({ vy: -launchSpeed(HERO.doubleJumpHeight, HERO.gravity), doubleJumped: true });
+  });
+
+  test('coyote time 的一般跳之後，還能再二段跳一次', () => {
+    const w = leaveEdge();
+    w.step([], ['jump']);
+    while (w.vy < 0) w.step(['jump']);
+    w.step(['jump'], ['jump']);
+    expect(w.h.doubleJumped).toBe(true);
+  });
+
+  test('地面招式被帶出平台邊緣：照一般重力往下掉、招式做完，做完時在空中就回到空中狀態', () => {
+    const w = standOn(800);
+    w.step([], ['attack']);
+    w.floorY = 0;
+    for (let i = 1; i < X1.startup + X1.active + X1.recovery; i++) w.step();
+    expect(w.h.attack?.move).toBe('x1');
+    expect(w.y).toBeGreaterThan(-800);
+    w.step();
+    expect(w.h.state).toBe(HeroState.Air);
+    w.untilLanded();
+    expect(w.y).toBe(0);
   });
 });

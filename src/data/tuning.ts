@@ -33,6 +33,8 @@ export const HERO = {
   jumpHeight: 300,
   doubleJumpHeight: 220,
   maxFallSpeed: 1500,
+  /** 走出平台邊緣後，這段時間內按 Z 還是一般跳（coyote time） */
+  coyoteMs: 100,
   /** 停止奔跑與跑＋X 的滑行距離：從跑速等減速到 0，約一個地板方格 */
   brakeDistance: 240,
   /** 滑行中按著反方向，減速快幾倍 */

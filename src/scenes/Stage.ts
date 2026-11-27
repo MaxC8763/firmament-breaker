@@ -3,6 +3,7 @@ import { addMp, newAttack, strike, type AttackInstance, type AttackSpec, type Hi
 import { attackShape, overlaps, toWorld, type Box, type HitboxData } from '../combat/hitbox';
 import hitboxes from '../data/hitboxes.json';
 import type { Manifest } from '../data/manifest';
+import { MAPS, PLATFORM_THICKNESS } from '../data/maps';
 import { GROUND_Y, GRUNT, HERO, SLASH, TICK_HZ, WAVE, WORLD_WIDTH, ticks } from '../data/tuning';
 import { installDevTools } from '../dev/devTools';
 import { Grunt } from '../entities/Grunt';
@@ -40,6 +41,8 @@ export interface Wave {
 const KEYS: Record<Button, number> = {
   left: Phaser.Input.Keyboard.KeyCodes.LEFT,
   right: Phaser.Input.Keyboard.KeyCodes.RIGHT,
+  up: Phaser.Input.Keyboard.KeyCodes.UP,
+  down: Phaser.Input.Keyboard.KeyCodes.DOWN,
   jump: Phaser.Input.Keyboard.KeyCodes.Z,
   attack: Phaser.Input.Keyboard.KeyCodes.X,
 };
@@ -56,6 +59,8 @@ export class Stage extends Phaser.Scene {
   private hitstop: number;
   /** 已經要求重來，這一幀剩下的 tick 不再跑 */
   private restarting: boolean;
+  /** ↓＋Z 往下穿時腳底的 y：腳底掉過平台的厚度之前，上緣在這個高度的平台都不擋 */
+  private dropY: number | null;
   private hud: Phaser.GameObjects.Graphics;
   private mpText: Phaser.GameObjects.Text;
   /** HUD 上次畫的 HP、MP；沒變就不重畫 */
@@ -78,6 +83,7 @@ export class Stage extends Phaser.Scene {
     this.slash = null;
     this.hitstop = 0;
     this.restarting = false;
+    this.dropY = null;
     this.hudShown = '';
   }
 
@@ -91,6 +97,14 @@ export class Stage extends Phaser.Scene {
     this.grunts = GRUNT.spawnX.map((x) => new Grunt(this, manifest, x));
     this.hero = new Hero(this, manifest);
     this.hero.show();
+
+    // 單向平台：static body 只開上緣的碰撞，從下面與側面都穿得過；只有主角會踩，敵人只走地面
+    const platforms = MAPS[0].platforms.map((p) => {
+      const body = this.physics.add.staticBody(p.x, p.top, p.w, PLATFORM_THICKNESS);
+      body.checkCollision.down = body.checkCollision.left = body.checkCollision.right = false;
+      return body;
+    });
+    this.physics.add.collider(this.hero, platforms, undefined, (_hero, p) => this.dropY === null || Math.abs((p as Phaser.Physics.Arcade.StaticBody).y - this.dropY) > 1);
 
     // HUD 畫在關卡場景裡、不跟鏡頭捲動；死亡重來時跟著場景重畫
     this.hud = this.add.graphics().setScrollFactor(0).setDepth(900);
@@ -140,8 +154,11 @@ export class Stage extends Phaser.Scene {
   /** 一個邏輯 tick：決策 → 物理一步 → 發射物 → 命中 */
   private tick(frame: InputFrame) {
     const out = this.hero.step(frame);
+    if (out.dropThrough) this.dropY = this.hero.body.bottom;
     for (const g of this.grunts) g.step(this.hero.x);
     this.physics.world.singleStep();
+    // 腳底掉過平台的下緣，那個平台的上緣已經離得夠遠，物理不會再把主角推回上面
+    if (this.dropY !== null && this.hero.body.bottom > this.dropY + PLATFORM_THICKNESS) this.dropY = null;
     if (out.spawnWave) this.spawnWave();
     this.moveWaves();
     this.resolveHits();
@@ -273,5 +290,9 @@ export class Stage extends Phaser.Scene {
     g.fillStyle(0x2a2f2b);
     g.fillRect(0, 0, WALL, GROUND_Y);
     g.fillRect(WORLD_WIDTH - WALL, 0, WALL, GROUND_Y);
+    for (const p of MAPS[0].platforms) {
+      g.fillStyle(0x7a6248).fillRect(p.x, p.top, p.w, PLATFORM_THICKNESS);
+      g.lineStyle(4, 0x1b1b1b).strokeRect(p.x, p.top, p.w, PLATFORM_THICKNESS);
+    }
   }
 }

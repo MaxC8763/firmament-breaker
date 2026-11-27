@@ -1,7 +1,7 @@
 // 輸入的純邏輯：場景每幀讀一次鍵盤，換成每個 tick 的「按著」與「剛按下」；時間一律用 tick
 import { INPUT, ticks } from '../data/tuning';
 
-export type Button = 'left' | 'right' | 'jump' | 'attack';
+export type Button = 'left' | 'right' | 'up' | 'down' | 'jump' | 'attack';
 
 export interface InputFrame {
   /** 這個 tick 按著的鍵 */
@@ -10,7 +10,7 @@ export interface InputFrame {
   pressed: Record<Button, boolean>;
 }
 
-export const noButtons = (): Record<Button, boolean> => ({ left: false, right: false, jump: false, attack: false });
+export const noButtons = (): Record<Button, boolean> => ({ left: false, right: false, up: false, down: false, jump: false, attack: false });
 
 /** 測試與場景共用：給按著、剛按下的鍵名，組成一個 tick 的輸入 */
 export function frameOf(held: Button[] = [], pressed: Button[] = []): InputFrame {

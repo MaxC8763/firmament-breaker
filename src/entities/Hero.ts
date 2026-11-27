@@ -34,6 +34,8 @@ export class Hero extends Phaser.Physics.Arcade.Sprite {
     const out = tickHero(this.logic, {
       frame,
       onGround: blocked.down,
+      // 能站的只有地面與單向平台：腳底比地面高就是踩在平台上
+      onPlatform: blocked.down && this.body.bottom < GROUND_Y - 1,
       vy: velocity.y,
       blocked: { left: blocked.left, right: blocked.right },
     });
