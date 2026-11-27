@@ -103,6 +103,8 @@ export interface HeroInput {
   onGround: boolean;
   /** 物理目前的垂直速度（+＝向下） */
   vy: number;
+  /** 物理上一步被擋住的方向（牆、地圖兩端） */
+  blocked: { left: boolean; right: boolean };
 }
 
 /** 交給物理的結果：vy 是 null 時保留物理自己的垂直速度 */
@@ -218,6 +220,8 @@ function decide(h: HeroLogic, input: HeroInput): HeroOutput {
   h.vy = input.vy;
   const dir = direction(f);
   if (h.invulnTicks > 0) h.invulnTicks--;
+  // 往滑行的方向被擋住（撞牆、到了地圖兩端），滑行就結束
+  if (h.slideV > 0 && (h.facing > 0 ? input.blocked.right : input.blocked.left)) h.slideV = 0;
   // 地面滑行每個 tick 減速；按著反方向減速更快
   if (h.slideV > 0) h.slideV = Math.max(0, h.slideV - h.slideDecel * (dir === -h.facing ? HERO.brakeTurnFactor : 1));
 

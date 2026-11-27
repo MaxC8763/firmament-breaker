@@ -30,7 +30,13 @@ export class Hero extends Phaser.Physics.Arcade.Sprite {
 
   /** 跑一個邏輯 tick，把結果交給物理；回傳邏輯的結果，讓場景處理生成劍氣這類事件 */
   step(frame: InputFrame) {
-    const out = tickHero(this.logic, { frame, onGround: this.body.blocked.down, vy: this.body.velocity.y });
+    const { blocked, velocity } = this.body;
+    const out = tickHero(this.logic, {
+      frame,
+      onGround: blocked.down,
+      vy: velocity.y,
+      blocked: { left: blocked.left, right: blocked.right },
+    });
     this.body.setVelocityX(out.vx);
     if (out.vy !== null) this.body.setVelocityY(out.vy);
     this.body.setAllowGravity(out.gravity);

@@ -229,3 +229,21 @@ test('開發模式：作弊鍵 1 MP 全滿、2 HP 全滿、3 無敵、` 切換�
   await pressOnce(page, 'Backquote', '!s.devShown');
   await pressOnce(page, 'Backquote', 's.devShown');
 });
+
+test('往左跑到地圖左端的牆再放開：撞牆就不滑，幾個 tick 內回到待機', async ({ page }) => {
+  await doubleTap(page, 'ArrowLeft');
+  // 主角的物理框半寬 30，左牆 24：腳底停在 x＝54
+  await until(page, 's.hero.x <= 60');
+  // 滑行只會有 1 tick，幀率低時取樣不一定看得到：改記最後一次看到在跑的 tick，和之後第一次看到待機的 tick
+  await watch(page, `
+    if (s.hero.state === 'Run') r.lastRun = s.tick;
+    if (r.lastRun !== undefined && s.hero.state === 'Idle' && r.idle === undefined) r.idle = { tick: s.tick, x: s.hero.x };
+  `);
+  await page.keyboard.up('ArrowLeft');
+  await untilRec(page, 'r.idle !== undefined');
+  const { lastRun, idle } = await rec(page);
+  console.log(`放開後 ${idle.tick - lastRun} tick 就回到待機`);
+  // 沒撞牆的話要滑約 50 tick；一幀最多補跑 6 tick，留兩幀的餘裕
+  expect(idle.tick - lastRun).toBeLessThanOrEqual(15);
+  expect(idle.x).toBeLessThanOrEqual(60);
+});

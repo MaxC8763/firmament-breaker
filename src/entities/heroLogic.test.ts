@@ -67,13 +67,20 @@ class World {
   onGround = true;
   /** 這次離地以來最高到哪（負的） */
   top = 0;
+  /** 牆的位置（主角腳底的 x 最遠能到哪）；沒有牆是 ±Infinity */
+  wallLeft = -Infinity;
+  wallRight = Infinity;
+  blocked = { left: false, right: false };
 
   step(held: Button[] = [], pressed: Button[] = []) {
-    const out = tickHero(this.h, { frame: frameOf(held, pressed), onGround: this.onGround, vy: this.vy });
+    const out = tickHero(this.h, { frame: frameOf(held, pressed), onGround: this.onGround, vy: this.vy, blocked: this.blocked });
     if (out.vy !== null) this.vy = out.vy;
     if (out.gravity) this.vy += HERO.gravity / TICK_HZ;
     this.vy = Math.max(-HERO.maxFallSpeed, Math.min(HERO.maxFallSpeed, this.vy));
     this.x += out.vx / TICK_HZ;
+    // 和 Arcade 的世界邊界一樣：越過牆就擋回來，並記下被擋住的方向
+    this.blocked = { left: this.x < this.wallLeft, right: this.x > this.wallRight };
+    this.x = Math.min(this.wallRight, Math.max(this.wallLeft, this.x));
     this.y += this.vy / TICK_HZ;
     if (this.y >= 0) {
       this.y = 0;
@@ -660,5 +667,61 @@ describe('X2、X3 往前踏', () => {
     expect(w.h.slideV).toBeGreaterThan(0);
     // X2 的揮砍（預備＋判定）是 3 格＝15 tick
     expect(out.vx).toBeCloseTo(w.h.slideV + (HERO.lunge.x2 / 15) * TICK_HZ);
+  });
+});
+
+describe('撞牆終止滑行', () => {
+  test('停止奔跑的滑行往前撞到牆就停下，回到待機', () => {
+    const w = new World();
+    runRight(w);
+    // 牆在前方 5 px：滑行的第一步（約 9.6 px）就撞到
+    w.wallRight = w.x + 5;
+    w.step();
+    expect(w.h.state).toBe(HeroState.Slide);
+    let n = 0;
+    while (w.h.state === HeroState.Slide && n < 100) {
+      w.step();
+      n++;
+    }
+    // 第一步就撞到牆，下一個 tick 滑行結束
+    expect(n).toBeLessThanOrEqual(2);
+    expect(w.h.state).toBe(HeroState.Idle);
+    expect(w.h.slideV).toBe(0);
+    expect(w.x).toBe(w.wallRight);
+  });
+
+  test('往左滑撞到左邊的牆也一樣', () => {
+    const w = new World();
+    w.step([], ['left']);
+    w.step([], ['left']);
+    for (let i = 0; i < 20; i++) w.step(['left']);
+    w.wallLeft = w.x - 5;
+    w.step();
+    w.step();
+    w.step();
+    expect(w.h.state).toBe(HeroState.Idle);
+    expect(w.x).toBe(w.wallLeft);
+  });
+
+  test('出招帶著的滑行撞到牆就停下，招式照常做完', () => {
+    const w = new World();
+    runRight(w);
+    w.wallRight = w.x + 5;
+    w.step(['right'], ['attack']);
+    w.step(['right']);
+    w.step(['right']);
+    expect(w.h.attack?.move).toBe('x1');
+    expect(w.h.slideV).toBe(0);
+    expect(w.step(['right']).vx).toBe(0);
+  });
+
+  test('背後有牆不影響往前滑', () => {
+    const w = new World();
+    runRight(w);
+    w.wallLeft = w.x;
+    w.step();
+    const out = w.step();
+    expect(w.h.state).toBe(HeroState.Slide);
+    expect(out.vx).toBeGreaterThan(0);
   });
 });
