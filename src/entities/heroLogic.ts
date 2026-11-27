@@ -1,6 +1,6 @@
 // 主角的決策：不 import phaser。每個 tick 收輸入與著地狀態，決定狀態、要交給物理的速度、要顯示哪一格
 import type { ArtFrame, ArtGroup } from '../data/manifest';
-import { HERO, TICK_HZ, ticks } from '../data/tuning';
+import { GRAVITY, HERO, TICK_HZ, ticks } from '../data/tuning';
 import {
   bufferPresses,
   direction,
@@ -33,7 +33,7 @@ const NEXT: Record<XMove, XMove | undefined> = { x1: 'x2', x2: 'x3', x3: undefin
 /** 正在出的招 */
 export interface Attack {
   move: XMove;
-  /** 在空中出的招：預備＋判定期間滯空，收招期間下落 */
+  /** 在空中出的招：揮砍期間飄浮往前、收招期間下落 */
   air: boolean;
   /** 出招後經過的 tick；照 meta 的 hold 換算成第幾格 */
   t: number;
@@ -78,6 +78,12 @@ export interface HeroLogic {
   slideV: number;
   /** 滑行每個 tick 減掉多少速度（按著反方向時再乘 brakeTurnFactor） */
   slideDecel: number;
+  /** 空中出招當下的水平速度：出招期間一直保持 */
+  carryVx: number;
+  /** 上一個 tick 交給物理的水平速度 */
+  lastVx: number;
+  /** 空中揮砍期間由邏輯算的垂直速度（較小的重力） */
+  airVy: number;
   hp: number;
   mp: number;
   /** 目前狀態經過的 tick（受擊、死亡） */
@@ -170,6 +176,9 @@ export const newHero = (moves: HeroMoves): HeroLogic => ({
   airAttackUsed: false,
   slideV: 0,
   slideDecel: 0,
+  carryVx: 0,
+  lastVx: 0,
+  airVy: 0,
   hp: HERO.hpMax,
   mp: 0,
   stateTicks: 0,
@@ -196,6 +205,12 @@ export function hurtHero(h: HeroLogic, damage: number, dir: number): boolean {
 }
 
 export function tickHero(h: HeroLogic, input: HeroInput): HeroOutput {
+  const out = decide(h, input);
+  h.lastVx = out.vx;
+  return out;
+}
+
+function decide(h: HeroLogic, input: HeroInput): HeroOutput {
   const t = ++h.tick;
   const f = input.frame;
   trackRun(h.run, f, t);
@@ -266,12 +281,15 @@ function slide(h: HeroLogic) {
   h.slideDecel = (HERO.runSpeed * HERO.runSpeed) / (2 * HERO.brakeDistance) / TICK_HZ;
 }
 
-/** 出招：面向鎖定、不能自己左右移動（地面的滑行、X2／X3 往前踏照樣有）；空中招在預備＋判定期間滯空 */
+/** 出招：面向鎖定、不能自己左右移動（地面的滑行、X2／X3 往前照樣有）；空中每一招開始時，跳躍帶來的垂直速度變小 */
 function startAttack(h: HeroLogic, move: XMove, air: boolean): HeroOutput {
   h.state = HeroState.Attack;
   h.landTicks = 0;
   h.attack = { move, air, t: 0, queued: false, landed: false };
-  if (air) h.airAttackUsed = true;
+  if (air) {
+    h.airAttackUsed = true;
+    h.airVy = h.vy * HERO.airSlashDamp;
+  }
   return attackOutput(h);
 }
 
@@ -280,7 +298,9 @@ function attacking(h: HeroLogic, input: HeroInput): HeroOutput | null {
   const a = h.attack!;
   a.t++;
   if (a.air && !a.landed && input.onGround && input.vy >= 0) {
+    // 空中出招落地：剩下的招式在地面做完
     a.landed = true;
+    h.carryVx = 0;
     h.doubleJumped = false;
     h.airAttackUsed = false;
   }
@@ -289,6 +309,10 @@ function attacking(h: HeroLogic, input: HeroInput): HeroOutput | null {
   if (next && !a.queued && takeBuffered(h.buffer, 'attack', h.tick)) a.queued = true;
 
   const frame = frameAt(h.moves[`hero/${a.move}`], a.t);
+  // 空中揮砍期間：垂直速度照較小的重力變化
+  if (a.air && !a.landed && frame && frame.phase !== 'recovery') {
+    h.airVy = Math.min(HERO.maxFallSpeed, h.airVy + (GRAVITY * HERO.airSlashGravity) / TICK_HZ);
+  }
   if (next && a.queued && (!frame || frame.phase === 'recovery')) {
     return startAttack(h, next, a.air && !a.landed && !input.onGround);
   }
@@ -309,9 +333,15 @@ function attackOutput(h: HeroLogic): HeroOutput {
   const g = h.moves[`hero/${a.move}`];
   const frame = frameAt(g, a.t);
   const spawnWave = a.move === 'x3' && frame?.phase === 'active' && frameAt(h.moves['hero/x3'], a.t - 1)?.phase !== 'active';
-  // X2、X3 在揮砍期間（預備＋判定）均勻往前，距離照格數換成速度；空中照樣滯空，只多了水平位移
-  const lunge = frame && frame.phase !== 'recovery' ? (HERO.lunge[a.move] / swingTicks(g)) * TICK_HZ : 0;
-  if (a.air && !a.landed && frame?.phase !== 'recovery') return { vx: h.facing * lunge, vy: 0, gravity: false, spawnWave };
+  // X2、X3 在揮砍期間（預備＋判定）均勻往前，距離照格數換成速度
+  const swinging = frame !== undefined && frame.phase !== 'recovery';
+  const lunge = swinging ? (HERO.lunge[a.move] / swingTicks(g)) * TICK_HZ : 0;
+  if (a.air && !a.landed) {
+    // 空中：保持出招當下的水平速度再加上往前；揮砍期間垂直速度由邏輯算（重力較小），X2、X3 微幅往上帶，像在空中往前游
+    if (!swinging) return { vx: h.carryVx, vy: null, gravity: true, spawnWave };
+    const lift = (HERO.lift[a.move] / swingTicks(g)) * TICK_HZ;
+    return { vx: h.carryVx + h.facing * lunge, vy: h.airVy - lift, gravity: false, spawnWave };
+  }
   // 地面的滑行和往前踏重疊時，兩個速度相加
   return { vx: h.facing * (h.slideV + lunge), vy: null, gravity: true, spawnWave };
 }
@@ -344,8 +374,11 @@ function land(h: HeroLogic) {
 
 /** 空中：按著方向才移動，轉向後降速；二段跳；上升中放開 Z 減速一次 */
 function air(h: HeroLogic, f: InputFrame, dir: number, launch?: number): HeroOutput {
-  // 空中 X 每次離地一輪；用完後到落地前按 X 沒反應
-  if (launch === undefined && takeBuffered(h.buffer, 'attack', h.tick) && !h.airAttackUsed) return startAttack(h, 'x1', true);
+  // 空中 X 每次離地一輪；用完後到落地前按 X 沒反應。出招時保持當下（上一個 tick）的水平速度
+  if (launch === undefined && takeBuffered(h.buffer, 'attack', h.tick) && !h.airAttackUsed) {
+    h.carryVx = h.lastVx;
+    return startAttack(h, 'x1', true);
+  }
   let vy: number | null = launch === undefined ? null : -launch;
   if (vy === null && !h.doubleJumped && takeBuffered(h.buffer, 'jump', h.tick)) {
     h.doubleJumped = true;

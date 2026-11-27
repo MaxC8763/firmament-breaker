@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { ArtGroup } from '../data/manifest';
-import { HERO, TICK_HZ, ticks } from '../data/tuning';
+import { GRAVITY, HERO, TICK_HZ, ticks } from '../data/tuning';
 import { frameOf, type Button } from '../input/input';
 import { activeFrame, HeroState, heroView, hurtHero, newHero, tickHero, type HeroLogic, type HeroMoves } from './heroLogic';
 
@@ -351,16 +351,71 @@ describe('空中 X', () => {
     return w;
   }
 
-  test('預備＋判定期間滯空，收招期間下落', () => {
-    const w = airX1();
-    const y = w.y;
+  test('空中出招：跳躍帶來的垂直速度剩三成，揮砍期間重力也只剩三成；收招照一般重力', () => {
+    const w = new World();
+    w.step(['jump'], ['jump']);
+    for (let i = 0; i < 8; i++) w.step(['jump']);
+    const rising = w.vy;
+    let out = w.step(['jump'], ['attack']);
+    expect(w.h.attack).toMatchObject({ move: 'x1', air: true });
+    expect(out).toMatchObject({ vx: 0, gravity: false });
+    expect(out.vy).toBeCloseTo(rising * HERO.airSlashDamp);
     for (let i = 1; i < X1.startup + X1.active; i++) {
-      expect(w.step(['jump'])).toMatchObject({ vx: 0, vy: 0, gravity: false });
+      const before = out.vy!;
+      out = w.step(['jump']);
+      expect(out.gravity).toBe(false);
+      expect(out.vy! - before).toBeCloseTo((GRAVITY * HERO.airSlashGravity) / TICK_HZ);
     }
-    expect(w.y).toBeCloseTo(y);
-    expect(w.step(['jump']).gravity).toBe(true);
-    w.step(['jump']);
-    expect(w.y).toBeGreaterThan(y);
+    out = w.step(['jump']);
+    expect(out).toMatchObject({ vy: null, gravity: true });
+  });
+
+  test('空中出招保持出招當下的水平速度，放開方向也一樣，收招期間也是', () => {
+    const w = new World();
+    w.step([], ['right']);
+    w.step([], ['right']);
+    w.step(['right'], ['jump']);
+    for (let i = 0; i < 5; i++) w.step(['right', 'jump']);
+    expect(w.step(['jump'], ['attack']).vx).toBe(HERO.runSpeed);
+    let ticksChecked = 0;
+    for (;;) {
+      const out = w.step(['jump']);
+      // 招式結束後回到一般的空中操作：沒按方向就不水平移動
+      if (w.h.state !== HeroState.Attack || w.h.attack?.landed) break;
+      expect(out.vx).toBe(HERO.runSpeed);
+      ticksChecked++;
+    }
+    expect(ticksChecked).toBeGreaterThan(X1.startup + X1.active);
+  });
+
+  test('空中 X2、X3：水平再加上往前的速度，垂直微幅往上帶', () => {
+    const w = airX1();
+    w.step(['jump'], ['attack']);
+    let out = w.step(['jump']);
+    while (w.h.attack?.move !== 'x2') out = w.step(['jump']);
+    // X2 的揮砍（預備＋判定）是 15 tick；沒按方向，出招當下的水平速度是 0
+    expect(out.vx).toBeCloseTo((HERO.lunge.x2 / 15) * TICK_HZ);
+    expect(out.vy).toBeCloseTo(w.h.airVy - (HERO.lift.x2 / 15) * TICK_HZ);
+    expect(out.gravity).toBe(false);
+  });
+
+  test('揮砍中落地：剩下的招式在地面做完', () => {
+    // 跳起來落下、快到地面時出招：揮砍中就落地
+    const w = new World();
+    w.step(['jump'], ['jump']);
+    while (!(w.vy > 0 && w.y > -40)) w.step(['jump']);
+    w.step([], ['attack']);
+    let landedWhileSwinging = false;
+    while (w.h.state === HeroState.Attack) {
+      const out = w.step();
+      if (w.h.attack?.landed && activeFrame(w.h)) {
+        landedWhileSwinging = true;
+        expect(out).toMatchObject({ vy: null, gravity: true });
+      }
+    }
+    expect(landedWhileSwinging).toBe(true);
+    expect(w.h.state).toBe(HeroState.Idle);
+    expect(w.onGround).toBe(true);
   });
 
   test('每次離地只有 1 輪，二段跳不重置，用完後到落地前按 X 沒反應；落地後重置', () => {
@@ -380,10 +435,10 @@ describe('空中 X', () => {
   });
 
   test('收招中落地：剩下的收招在地面繼續，顯示落地格', () => {
-    // 小跳後馬上出招：滯空結束時離地很近，收招中會落地
+    // 跳起來落下、離地約 150 px 時出招：揮砍期間飄得慢，收招照一般重力落下，收招中落地
     const w = new World();
-    w.step([], ['jump']);
-    w.step();
+    w.step(['jump'], ['jump']);
+    while (!(w.vy > 0 && w.y > -170)) w.step(['jump']);
     w.step([], ['attack']);
     let landedView = '';
     for (let i = 0; i < 100 && w.h.state === HeroState.Attack; i++) {
@@ -569,7 +624,7 @@ describe('X2、X3 往前踏', () => {
     expect(moved.x3).toBeCloseTo(-HERO.lunge.x3);
   });
 
-  test('空中的 X2、X3 也往前踏，期間照樣滯空', () => {
+  test('空中的 X2、X3 也往前，揮砍期間不受一般重力', () => {
     const w = new World();
     w.step(['jump'], ['jump']);
     for (let i = 0; i < 8; i++) w.step(['jump']);
@@ -583,9 +638,9 @@ describe('X2、X3 往前踏', () => {
       const a = w.h.attack;
       if (!a) break;
       moved[a.move] += w.x - before;
-      if (activeFrame(w.h) === null && heroView(w.h).frame?.endsWith('_00')) {
-        // 預備格：滯空
-        expect(out).toMatchObject({ vy: 0, gravity: false });
+      if (activeFrame(w.h) === null && heroView(w.h).frame?.endsWith('_00') && !a.landed) {
+        // 預備格：垂直速度由邏輯算，不受一般重力
+        expect(out.gravity).toBe(false);
         checked++;
       }
     }
