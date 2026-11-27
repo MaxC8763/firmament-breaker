@@ -33,6 +33,8 @@ export const HERO = {
   jumpHeight: 300,
   doubleJumpHeight: 220,
   maxFallSpeed: 1500,
+  /** 走出平台邊緣後，這段時間內按 Z 還是一般跳（coyote time） */
+  coyoteMs: 100,
   /** 停止奔跑與跑＋X 的滑行距離：從跑速等減速到 0，約一個地板方格 */
   brakeDistance: 240,
   /** 滑行中按著反方向，減速快幾倍 */
@@ -47,12 +49,19 @@ export const HERO = {
   airSlashGravity: 0.3,
   hpMax: 1000,
   mpMax: 300,
+  /** MP 自然回復：每秒幾點（暫停、命中停頓、死亡時不回） */
+  mpPerSecond: 2,
   hurtMs: 300,
   knockback: 120,
   /** 被打後無敵多久（含硬直） */
   invulnMs: 1000,
   /** 受擊閃白多久 */
   flashMs: 100,
+  /** 在地面待機、沒按任何遊戲鍵這麼久就打盹 */
+  dozeMs: 10000,
+  /** 待機的呼吸：以腳底為基準上下伸縮的週期與幅度 */
+  breathMs: 2000,
+  breathScale: 0.02,
 };
 
 /** 真空切劍氣：X3 判定開始時在主角前方生成，往前飛 */
@@ -77,18 +86,27 @@ export const SLASH = {
   hitstopMs: 60,
 };
 
-/** 雜兵 A 小兵 */
-export const GRUNT = {
-  hp: 120,
-  speed: 120,
-  /** 主角在水平這個距離內就追 */
-  chaseRange: 600,
+/** 地圖上的道具：碰到就吃掉，超過上限的部分捨去 */
+export const ITEM = { hp: 300, mp: 100 };
+
+/** 雜兵共用：受擊反應與碰撞傷害 */
+export const ENEMY = {
   hurtMs: 300,
   knockback: 40,
   /** 受擊閃白多久 */
   flashMs: 100,
   /** 碰到主角造成的傷害 */
   contactDamage: 50,
-  /** 地圖上的位置：中段到右端 */
-  spawnX: [1600, 2400, 3300],
 };
+
+/** 各種雜兵的數值；chaseRange＝主角在水平這個距離內就追；armorHits＝霸體段數（0＝沒有霸體）、breakMs＝破甲多久 */
+export const ENEMIES = {
+  /** A 小兵 */
+  grunt: { hp: 120, speed: 120, chaseRange: 600, armorHits: 0, breakMs: 0 },
+  /** B 砲手：不動；主角在水平 range 內，每 intervalMs 朝主角那側水平射一發，彈丸從腳底前方 muzzleX、上方 muzzleY 出來 */
+  gunner: { hp: 120, armorHits: 0, breakMs: 0, range: 900, intervalMs: 2000, bulletSpeed: 500, bulletDamage: 60, muzzleX: 90, muzzleY: 110 },
+  /** C 重甲兵：主角在揮擊範圍內、距上次揮擊滿 swingEveryMs 才揮；揮擊的預備、判定、收招照 attack 動作的格 */
+  heavy: { hp: 360, speed: 60, chaseRange: 600, armorHits: 8, breakMs: 2500, swingEveryMs: 3000, swingDamage: 120 },
+};
+
+export type EnemyKind = keyof typeof ENEMIES;

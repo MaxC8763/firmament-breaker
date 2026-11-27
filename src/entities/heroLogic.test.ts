@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { ArtGroup } from '../data/manifest';
 import { GRAVITY, HERO, TICK_HZ, ticks } from '../data/tuning';
 import { frameOf, type Button } from '../input/input';
-import { activeFrame, HeroState, heroView, hurtHero, newHero, tickHero, type HeroLogic, type HeroMoves } from './heroLogic';
+import { activeFrame, eatItem, HeroState, heroView, hurtHero, launchSpeed, newHero, tickHero, type HeroLogic, type HeroMoves } from './heroLogic';
 
 // 和佔位圖同樣的格數；測試只依賴這份，不讀美術檔
 const group = (frames: ArtGroup['frames']): ArtGroup => ({ canvas: [768, 512], fps: 12, loop: false, frames });
@@ -51,7 +51,19 @@ const MOVES: HeroMoves = {
     { file: 'death_02', hold: 2 },
     { file: 'death_03', hold: 6 },
   ]),
+  // 打盹轉場 3＋3＋4 格＝50 tick；驚醒 1＋1 格＝10 tick（約 170 ms）
+  'hero/doze_in': group([
+    { file: 'doze_in_00', hold: 3 },
+    { file: 'doze_in_01', hold: 3 },
+    { file: 'doze_in_02', hold: 4 },
+  ]),
+  'hero/doze': { ...group([{ file: 'doze_00', hold: 8 }, { file: 'doze_01', hold: 8 }]), loop: true },
+  'hero/wake': group([
+    { file: 'wake_00', hold: 1 },
+    { file: 'wake_01', hold: 1 },
+  ]),
 };
+const WAKE = 10;
 const X1 = { startup: 5, active: 10, recovery: 10 };
 const X3 = { startup: 10, active: 10, recovery: 20 };
 
@@ -71,9 +83,13 @@ class World {
   wallLeft = -Infinity;
   wallRight = Infinity;
   blocked = { left: false, right: false };
+  /** 腳下能站的高度：0＝地面，負的＝單向平台；改回 0 就是平台到了盡頭 */
+  floorY = 0;
 
   step(held: Button[] = [], pressed: Button[] = []) {
-    const out = tickHero(this.h, { frame: frameOf(held, pressed), onGround: this.onGround, vy: this.vy, blocked: this.blocked });
+    const onPlatform = this.onGround && this.floorY < 0;
+    const out = tickHero(this.h, { frame: frameOf(held, pressed), onGround: this.onGround, onPlatform, vy: this.vy, blocked: this.blocked });
+    if (out.dropThrough) this.floorY = 0;
     if (out.vy !== null) this.vy = out.vy;
     if (out.gravity) this.vy += HERO.gravity / TICK_HZ;
     this.vy = Math.max(-HERO.maxFallSpeed, Math.min(HERO.maxFallSpeed, this.vy));
@@ -82,8 +98,8 @@ class World {
     this.blocked = { left: this.x < this.wallLeft, right: this.x > this.wallRight };
     this.x = Math.min(this.wallRight, Math.max(this.wallLeft, this.x));
     this.y += this.vy / TICK_HZ;
-    if (this.y >= 0) {
-      this.y = 0;
+    if (this.y >= this.floorY) {
+      this.y = this.floorY;
       this.vy = 0;
       this.onGround = true;
     } else {
@@ -723,5 +739,188 @@ describe('撞牆終止滑行', () => {
     const out = w.step();
     expect(w.h.state).toBe(HeroState.Slide);
     expect(out.vx).toBeGreaterThan(0);
+  });
+});
+
+describe('單向平台與 coyote time', () => {
+  /** 站在離地 height 的平台上 */
+  const standOn = (height = 200) => {
+    const w = new World();
+    w.y = w.floorY = -height;
+    idle(w, 2);
+    return w;
+  };
+  /** 在平台上往右走，走到平台盡頭：物理已經掉出邊緣，邏輯還沒看到 */
+  const leaveEdge = () => {
+    const w = standOn();
+    w.step(['right']);
+    w.floorY = 0;
+    w.step(['right']);
+    return w;
+  };
+  const JUMP = launchSpeed(HERO.jumpHeight, HERO.gravity);
+
+  test('站在單向平台上 ↓＋Z：往下穿過、不起跳', () => {
+    const w = standOn();
+    expect(w.step(['down'], ['jump']).dropThrough).toBe(true);
+    expect(w.h.state).toBe(HeroState.Air);
+    w.untilLanded(['down']);
+    expect(w.y).toBe(0);
+    expect(w.top).toBeGreaterThanOrEqual(-200);
+  });
+
+  test('在地面 ↓＋Z 照常起跳', () => {
+    const w = new World();
+    const out = w.step(['down', 'jump'], ['jump']);
+    expect(out.dropThrough).toBeUndefined();
+    expect(out.vy).toBe(-JUMP);
+    w.untilLanded(['jump']);
+    expect(Math.abs(-w.top - HERO.jumpHeight)).toBeLessThanOrEqual(1);
+  });
+
+  test('走出平台邊緣就進入空中往下掉', () => {
+    const w = leaveEdge();
+    w.step(['right']);
+    expect(w.h.state).toBe(HeroState.Air);
+    expect(w.vy).toBeGreaterThan(0);
+    w.untilLanded(['right']);
+    expect(w.y).toBe(0);
+    expect(w.h.state).toBe(HeroState.Walk);
+  });
+
+  test('走出平台邊緣後 100 ms 內按 Z 是一般跳，之後是二段跳', () => {
+    /** 掉出邊緣後的第 k 個 tick 按 Z */
+    const jumpAt = (k: number) => {
+      const w = leaveEdge();
+      idle(w, k - 1);
+      const out = w.step([], ['jump']);
+      return { vy: out.vy, doubleJumped: w.h.doubleJumped };
+    };
+    const n = ticks(HERO.coyoteMs);
+    expect(jumpAt(1)).toEqual({ vy: -JUMP, doubleJumped: false });
+    expect(jumpAt(n)).toEqual({ vy: -JUMP, doubleJumped: false });
+    expect(jumpAt(n + 1)).toEqual({ vy: -launchSpeed(HERO.doubleJumpHeight, HERO.gravity), doubleJumped: true });
+  });
+
+  test('coyote time 的一般跳之後，還能再二段跳一次', () => {
+    const w = leaveEdge();
+    w.step([], ['jump']);
+    while (w.vy < 0) w.step(['jump']);
+    w.step(['jump'], ['jump']);
+    expect(w.h.doubleJumped).toBe(true);
+  });
+
+  test('地面招式被帶出平台邊緣：照一般重力往下掉、招式做完，做完時在空中就回到空中狀態', () => {
+    const w = standOn(800);
+    w.step([], ['attack']);
+    w.floorY = 0;
+    for (let i = 1; i < X1.startup + X1.active + X1.recovery; i++) w.step();
+    expect(w.h.attack?.move).toBe('x1');
+    expect(w.y).toBeGreaterThan(-800);
+    w.step();
+    expect(w.h.state).toBe(HeroState.Air);
+    w.untilLanded();
+    expect(w.y).toBe(0);
+  });
+});
+
+describe('MP 自然回復與道具', () => {
+  test('MP 每秒回 2 點，到上限就停', () => {
+    const w = new World();
+    idle(w, TICK_HZ);
+    expect(w.h.mp).toBe(HERO.mpPerSecond);
+    expect(HERO.mpPerSecond).toBe(2);
+    w.h.mp = HERO.mpMax - 1;
+    idle(w, TICK_HZ);
+    expect(w.h.mp).toBe(HERO.mpMax);
+  });
+
+  test('出招中照樣回 MP', () => {
+    const w = new World();
+    w.h.mp = 100;
+    w.step([], ['attack']);
+    for (let i = 1; i < TICK_HZ; i++) w.step(i % 10 ? [] : ['attack'], i % 10 ? [] : ['attack']);
+    expect(w.h.mp).toBe(102);
+  });
+
+  test('死亡時不回 MP', () => {
+    const w = new World();
+    w.h.mp = 100;
+    hurtHero(w.h, HERO.hpMax, 1);
+    expect(w.h.state).toBe(HeroState.Dead);
+    idle(w, TICK_HZ);
+    expect(w.h.mp).toBe(100);
+  });
+
+  test('道具：HP +300、MP +100，超過上限的部分捨去，滿了也照吃', () => {
+    const h = newHero(MOVES);
+    h.hp = 500;
+    expect(eatItem(h, 'hp')).toBe(true);
+    expect(h.hp).toBe(800);
+    expect(eatItem(h, 'hp')).toBe(true);
+    expect(h.hp).toBe(HERO.hpMax);
+    expect(eatItem(h, 'hp')).toBe(true);
+    h.mp = 250;
+    expect(eatItem(h, 'mp')).toBe(true);
+    expect(h.mp).toBe(HERO.mpMax);
+  });
+
+  test('死亡時碰到道具不吃', () => {
+    const h = newHero(MOVES);
+    hurtHero(h, HERO.hpMax, 1);
+    expect(eatItem(h, 'hp')).toBe(false);
+    expect(h.hp).toBe(0);
+  });
+});
+
+describe('待機與打盹', () => {
+  const DOZE = ticks(HERO.dozeMs);
+  /** 在地面站著不動到打盹 */
+  const dozing = () => {
+    const w = new World();
+    idle(w, DOZE);
+    return w;
+  };
+
+  test('在地面待機、不動 10 秒就打盹；按了鍵就重算', () => {
+    const w = new World();
+    idle(w, DOZE - 1);
+    expect(w.h.state).toBe(HeroState.Idle);
+    w.step(['left'], ['left']);
+    idle(w, DOZE - 1);
+    expect(w.h.state).toBe(HeroState.Idle);
+    w.step();
+    expect(w.h.state).toBe(HeroState.Doze);
+    // 先播打盹轉場，播完才是打盹循環
+    expect(heroView(w.h).anim).toBe('hero/doze_in');
+    idle(w, 50);
+    expect(heroView(w.h)).toEqual({ anim: 'hero/doze' });
+  });
+
+  test('打盹中按 → 先驚醒（約 170 ms，期間不動），驚醒後照按著的方向走', () => {
+    const w = dozing();
+    w.step(['right'], ['right']);
+    expect(w.h.state).toBe(HeroState.Wake);
+    for (let i = 1; i < WAKE; i++) expect(w.step(['right']).vx).toBe(0);
+    w.step(['right']);
+    expect(w.h.state).toBe(HeroState.Idle);
+    expect(w.step(['right']).vx).toBe(HERO.walkSpeed);
+    expect(w.h.state).toBe(HeroState.Walk);
+  });
+
+  test('打盹中按 Z：驚醒後才起跳（按鍵留到驚醒後執行）', () => {
+    const w = dozing();
+    w.step(['jump'], ['jump']);
+    for (let i = 0; i < WAKE; i++) w.step();
+    expect(w.y).toBe(0);
+    w.step();
+    expect(w.h.state).toBe(HeroState.Air);
+    expect(w.vy).toBeLessThan(0);
+  });
+
+  test('打盹中被打直接受擊', () => {
+    const w = dozing();
+    expect(hurtHero(w.h, 50, -1)).toBe(true);
+    expect(w.h.state).toBe(HeroState.Hurt);
   });
 });

@@ -1,127 +1,35 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { HERO } from '../src/data/tuning';
 import { shotPath } from './env';
+import { state, until, watch, rec, untilRec, pressOnce, doubleTap, xxx, CLOSE_ENOUGH, freezeWhenWaveFlies, shootFrozen, ready, walkRightUntil } from './helpers';
 
-// 遊戲邏輯是固定 tick，幀率低只是一幀補跑幾個 tick：一律等狀態變了再做下一步，不用固定秒數等。
-// 機器很忙時，Playwright 的每個指令都可能慢到錯過只持續幾百毫秒的狀態，所以短暫的事件交給網頁裡的 watch 每幀記錄。
 // CI 的瀏覽器用軟體算繪，幀率低，整支測試給寬一點的時間
 test.describe.configure({ timeout: 60_000 });
 
-const state = (page: Page) => page.evaluate(() => (window as any).__game.getState());
-const until = (page: Page, fn: string, timeout = 30_000) =>
-  page.waitForFunction(`(() => { const s = window.__game.getState(); return ${fn}; })()`, null, { timeout });
-
-/** 在網頁裡每幀跑一次 body（s＝getState()、r＝紀錄），之後用 untilRec／rec 讀紀錄 */
-async function watch(page: Page, body: string) {
-  await page.evaluate((body) => {
-    const w = window as any;
-    w.__rec = {};
-    const f = new Function('s', 'r', body);
-    const loop = () => {
-      f(w.__game.getState(), w.__rec);
-      requestAnimationFrame(loop);
-    };
-    loop();
-  }, body);
-}
-const rec = (page: Page) => page.evaluate(() => (window as any).__rec);
-const untilRec = (page: Page, fn: string) =>
-  page.waitForFunction(`(() => { const r = window.__rec; return ${fn}; })()`, null, { timeout: 30_000 });
-
-/** 按一下 key，等條件成立；作弊鍵這類切換鍵只能按一下，多按會切回去 */
-async function pressOnce(page: Page, key: string, fn: string) {
-  await page.keyboard.press(key);
-  await until(page, fn);
-}
-
-/** 連按兩下並按住，直到跑起來：兩下之間等邏輯跑過一個 tick，免得同一幀裡的兩下被當成一下；太慢沒接上就放開重來 */
-async function doubleTap(page: Page, key: string) {
-  for (let i = 0; i < 5; i++) {
-    const { tick } = await state(page);
-    await page.keyboard.press(key);
-    await until(page, `s.tick > ${tick + 1}`);
-    await page.keyboard.down(key);
-    if (await until(page, "s.hero.state === 'Run'", 2_000).then(() => true, () => false)) return;
-    await page.keyboard.up(key);
-    await until(page, "s.hero.state === 'Idle'");
-  }
-  throw new Error(`連按兩下 ${key} 五次都沒有跑起來`);
-}
-
-/**
- * 出 XXX：接招的時機只有一招的長度（約 25 tick），機器很忙時 Playwright 一來一回就可能錯過，
- * 所以改在網頁裡每幀看招式，待機、X1、X2 各按一次 X（和真的鍵盤一樣送到 window），到 X3 為止。
- * startWhen（s＝getState()）成立的那一幀才按第一下：出招時和小兵的距離不受 Playwright 的延遲影響
- */
-async function xxx(page: Page, startWhen = 'true') {
-  await page.evaluate((startWhen) => {
-    const w = window as any;
-    const ready = new Function('s', `return ${startWhen};`);
-    const press = () => {
-      for (const type of ['keydown', 'keyup']) window.dispatchEvent(new KeyboardEvent(type, { key: 'x', code: 'KeyX', keyCode: 88 } as KeyboardEventInit));
-    };
-    const pressed = new Set<string>();
-    w.__xxx = false;
-    const loop = () => {
-      const s = w.__game.getState();
-      const move = s.hero.move ?? 'none';
-      if (move === 'x3') return (w.__xxx = true);
-      if (!pressed.has(move) && (move !== 'none' || ready(s))) {
-        pressed.add(move);
-        press();
-      }
-      requestAnimationFrame(loop);
-    };
-    loop();
-  }, startWhen);
-  await page.waitForFunction(() => (window as any).__xxx, null, { timeout: 30_000 });
-}
-
-/**
- * 小兵走到前方 250 px 內就出 XXX：X1 的斬擊搆得到（框伸到 210、小兵半寬 66），
- * X2、X3 往前合計 240 px 會一路追上被擊退的小兵；再近的話，主角會衝到小兵身上，劍氣生成在它前面、打不到它
- */
-const CLOSE_ENOUGH = 's.enemies.some((e) => e.x - s.hero.x < 250)';
-
-/** 劍氣飛出去 60 px 的那一幀把關卡暫停（畫面照樣算繪），截圖一定拍得到劍氣；截完由 shootFrozen 繼續 */
-const freezeWhenWaveFlies = (page: Page) =>
-  watch(page, `
-    if (!r.frozen && s.waves.length > 0 && s.waves[0].x - s.waves[0].fromX > 60) {
-      r.frozen = true;
-      window.__game.pause();
-    }
-  `);
-
-async function shootFrozen(page: Page, name: string) {
-  await untilRec(page, 'r.frozen');
-  await page.screenshot({ path: shotPath(name) });
-  await page.evaluate(() => (window as any).__game.resume());
-}
-
-test.beforeEach(async ({ page }) => {
-  await page.goto('/');
-  await page.waitForFunction(() => document.body.dataset.game === 'ready', null, { timeout: 30_000 });
-});
+test.beforeEach(({ page }) => ready(page));
 
 test('連按兩下 → 跑，鏡頭跟著主角捲動；放開後滑行一小段才停', async ({ page }) => {
   // 先開無敵：會跑過第一隻小兵，被撞到就不跑了
   await pressOnce(page, '3', 's.hero.invincible');
   await doubleTap(page, 'ArrowRight');
   expect((await state(page)).hero.vx).toBe(HERO.runSpeed);
-  await until(page, 's.hero.x > 1600');
-  const s = await state(page);
-  expect(s.cameraX).toBeGreaterThan(0);
-  // 主角留在畫面裡
-  expect(s.hero.x - s.cameraX).toBeGreaterThan(0);
-  expect(s.hero.x - s.cameraX).toBeLessThan(1920);
-  await page.screenshot({ path: shotPath('play-run') });
+  // 跑過 x＝1600 的那一幀就在網頁裡放開，再記下滑行：等 Playwright 一來一回的話，機器忙時主角會先跑到右牆，撞牆就不滑了
   await watch(page, `
-    if (s.hero.state === 'Slide' && r.from === undefined) r.from = s.hero.x;
+    if (!r.released && s.hero.x > 1600) {
+      r.released = { cameraX: s.cameraX, screenX: s.hero.x - s.cameraX };
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 }));
+    }
+    if (r.released && s.hero.state === 'Slide' && r.from === undefined) r.from = s.hero.x;
     if (r.from !== undefined && s.hero.state === 'Idle') r.to = s.hero.x;
   `);
-  await page.keyboard.up('ArrowRight');
   await untilRec(page, 'r.to !== undefined');
-  const { from, to } = await rec(page);
+  await page.keyboard.up('ArrowRight');
+  const { released, from, to } = await rec(page);
+  expect(released.cameraX).toBeGreaterThan(0);
+  // 主角留在畫面裡
+  expect(released.screenX).toBeGreaterThan(0);
+  expect(released.screenX).toBeLessThan(1920);
+  await page.screenshot({ path: shotPath('play-run') });
   console.log(`放開後滑了 ${Math.round(to - from)} px`);
   expect(to).toBeGreaterThan(from);
 });
@@ -177,17 +85,16 @@ test('XXX 打倒 1 隻小兵，MP 增加 16–20（斬擊 3 段各 5，加上劍
   // 先開無敵（作弊鍵 3），免得連段被小兵撞斷；關掉判定框這些開發用的顯示，截乾淨的戰鬥畫面
   await pressOnce(page, '3', 's.hero.invincible');
   await pressOnce(page, 'Backquote', '!s.devShown');
-  // 走到最近的小兵附近，等它追過來進到斬擊範圍
-  await page.keyboard.down('ArrowRight');
-  await until(page, 's.enemies.some((e) => e.x - s.hero.x < 400)');
-  await page.keyboard.up('ArrowRight');
   const before = await state(page);
   // 劍氣在飛的時候截一張戰鬥畫面（主角、小兵、劍氣、HUD）
   await freezeWhenWaveFlies(page);
+  // 走到最近的小兵 400 px 內就停，等它追過來進到斬擊範圍
+  await walkRightUntil(page, 's.enemies.some((e) => e.x - s.hero.x < 400)');
   await xxx(page, CLOSE_ENOUGH);
   await shootFrozen(page, 'play-combat');
   await until(page, `s.enemies.length === ${before.enemies.length - 1}`);
-  const gained = (await state(page)).hero.mp - before.hero.mp;
+  // MP 會自然回復：只看打中敵人回的 MP
+  const gained = (await state(page)).mpFromHits - before.mpFromHits;
   console.log(`打倒 1 隻小兵，MP +${gained}`);
   expect(gained).toBeGreaterThanOrEqual(16);
   expect(gained).toBeLessThanOrEqual(20);
@@ -214,10 +121,8 @@ test('開發模式：作弊鍵 1 MP 全滿、2 HP 全滿、3 無敵、` 切換�
   await pressOnce(page, '1', 's.hero.mp === 300');
   await pressOnce(page, '3', 's.hero.invincible');
   // 走到小兵旁邊出 XXX：判定框、傷害數字與段數都畫出來
-  await page.keyboard.down('ArrowRight');
-  await until(page, 's.enemies.some((e) => e.x - s.hero.x < 400)');
-  await page.keyboard.up('ArrowRight');
   await freezeWhenWaveFlies(page);
+  await walkRightUntil(page, 's.enemies.some((e) => e.x - s.hero.x < 400)');
   await xxx(page, CLOSE_ENOUGH);
   await shootFrozen(page, 'play-dev');
   // 關掉無敵，往右走到被下一隻小兵撞到，再用 2 補滿

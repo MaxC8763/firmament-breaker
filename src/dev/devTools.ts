@@ -2,14 +2,14 @@ import Phaser from 'phaser';
 import type { AttackInstance, HitResult } from '../combat/attack';
 import type { Box } from '../combat/hitbox';
 import type { Manifest } from '../data/manifest';
-import { GROUND_Y, HERO } from '../data/tuning';
-import type { Grunt } from '../entities/Grunt';
-import { GruntState } from '../entities/gruntLogic';
+import { GROUND_Y, HERO, TICK_HZ } from '../data/tuning';
+import type { Enemy } from '../entities/Enemy';
+import { EnemyState, hurtEnemy, swingActive } from '../entities/enemyLogic';
 import { heroView, HeroState } from '../entities/heroLogic';
-import { HIT_EVENT, type Stage } from '../scenes/Stage';
+import { HIT_EVENT, onKey, type Stage } from '../scenes/Stage';
 
 const KEY = Phaser.Input.Keyboard.KeyCodes;
-const COLOR = { hurtbox: 0x2f7bff, attack: 0xff3040, wave: 0xff9a1f, cross: 0xe0218a };
+const COLOR = { hurtbox: 0x2f7bff, attack: 0xff3040, wave: 0xff9a1f, enemyAttack: 0x9b30ff, cross: 0xe0218a };
 
 // 只在開發模式（npm run dev）載入：正式建置裡 import.meta.env.DEV 是 false，這段會被整個拿掉
 
@@ -34,7 +34,13 @@ export interface GameState {
     /** 作弊鍵 3 的無敵 */
     invincible: boolean;
   };
-  enemies: { x: number; y: number; state: string; facing: number; hp: number }[];
+  enemies: { kind: string; x: number; y: number; state: string; facing: number; hp: number; armor: { left: number; max: number; broken: number } }[];
+  /** 地圖上還沒被吃掉的道具 */
+  items: { kind: string; x: number; y: number }[];
+  /** 這張地圖打中敵人回了多少 MP（不含自然回復與道具；超過上限捨去的也算） */
+  mpFromHits: number;
+  /** 飛行中的敵方彈丸（中心） */
+  bullets: { x: number; y: number }[];
   /** 飛行中的劍氣，x 是世界座標，fromX 是生成時的 x */
   waves: { x: number; y: number; fromX: number }[];
   /** 這一局生成過幾道劍氣 */
@@ -44,6 +50,15 @@ export interface GameState {
   cameraX: number;
   /** 邏輯跑過的 tick 數 */
   tick: number;
+  /** 第幾張地圖（0 起算） */
+  map: number;
+  /** 進入這張地圖時的 HP／MP：死亡重來用 */
+  entry: { hp: number; mp: number };
+  doorOpen: boolean;
+  /** 關卡完成畫面 */
+  complete: boolean;
+  /** 暫停選單開著，關卡停住 */
+  paused: boolean;
 }
 
 declare global {
@@ -53,6 +68,12 @@ declare global {
       /** 暫停與繼續關卡場景（畫面照樣算繪）：瀏覽器測試用來定格截圖 */
       pause(): void;
       resume(): void;
+      /** 設定主角的 HP：不用等被打很久 */
+      setHp(hp: number): void;
+      /** 直接進第 map 張地圖（0 起算）的入口，HP／MP 沒給就照目前的 */
+      enter(map: number, hp?: number, mp?: number): void;
+      /** 把主角放到 x（腳底，地面上） */
+      placeHero(x: number): void;
     };
   }
 }
@@ -66,8 +87,10 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
   const boxes = scene.add.graphics().setDepth(1000);
   const world = scene.physics.world;
   world.createDebugGraphic();
+  const armorTexts = new Map<Enemy, Phaser.GameObjects.Text>();
   const draw = () => {
     boxes.clear().setVisible(shown);
+    for (const t of armorTexts.values()) t.setVisible(shown);
     world.debugGraphic.setVisible(shown);
     world.drawDebug = shown;
     if (!shown) return;
@@ -76,16 +99,29 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
       if (fill) boxes.fillStyle(color, 0.25).fillRect(b.left, b.top, b.right - b.left, b.bottom - b.top);
     };
     rect(scene.heroHurtbox(), COLOR.hurtbox);
-    for (const g of scene.grunts) rect(g.hurtbox(), COLOR.hurtbox);
+    for (const e of scene.enemies) rect(e.hurtbox(), COLOR.hurtbox);
     const attack = scene.heroAttackBox();
     if (attack) rect(attack, COLOR.attack, true);
     for (const w of scene.waves) rect(scene.waveBox(w), COLOR.wave, true);
+    for (const b of scene.bullets) rect(scene.bulletBox(b.p), COLOR.enemyAttack, true);
+    for (const e of scene.enemies) if (swingActive(e.logic)) rect(e.attackBox()!, COLOR.enemyAttack, true);
+    // 有霸體的雜兵頭上顯示「霸體 n／段數」，破甲時顯示剩幾秒
+    for (const [e, t] of armorTexts) if (!scene.enemies.includes(e)) (t.destroy(), armorTexts.delete(e));
+    for (const e of scene.enemies) {
+      const a = e.logic.armor;
+      if (a.max === 0) continue;
+      let t = armorTexts.get(e);
+      if (!t) armorTexts.set(e, (t = scene.add.text(0, 0, '', { fontFamily: 'sans-serif', fontSize: '26px', color: '#ffffff', stroke: '#1b1b1b', strokeThickness: 5 }).setOrigin(0.5).setDepth(1001)));
+      t.setPosition(e.x, e.y - 250).setText(a.broken > 0 ? `破甲 ${(a.broken / TICK_HZ).toFixed(1)} 秒` : `霸體 ${a.left}／${a.max}`);
+    }
     boxes.lineStyle(2, COLOR.cross);
     boxes.lineBetween(hero.x - 14, hero.y, hero.x + 14, hero.y);
     boxes.lineBetween(hero.x, hero.y - 14, hero.x, hero.y + 14);
   };
-  // 傷害數字與「已造成段數／上限」：飄起來再淡出
-  const onHit = (g: Grunt, result: HitResult, damage: number, attack: AttackInstance) => {
+  // 傷害數字與「已造成段數／上限」：飄起來再淡出。命中回復的 MP 不管顯示開著沒都要記
+  let mpFromHits = 0;
+  const onHit = (g: Enemy, result: HitResult, damage: number, attack: AttackInstance) => {
+    if (result === 'damage') mpFromHits += attack.spec.mp;
     if (!shown) return;
     const count = attack.contacts.get(g.logic)?.count ?? 0;
     const label = `${result === 'damage' ? damage : '—'}  ${count}/${attack.spec.maxHits}`;
@@ -103,20 +139,19 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
     scene.events.off(HIT_EVENT, onHit);
   });
 
-  // 作弊鍵：1＝MP 全滿、2＝HP 全滿、3＝無敵切換、`＝切換上面的顯示。按鍵在場景關閉時連同監聽一起移除。
-  // 鍵盤外掛在同一幀裡收到下一個按鍵時，會把這一幀已經處理過的按鍵事件從頭再處理一次，DOWN 會重複觸發；
-  // 切換類的鍵按一下只能切一次，所以用事件物件去重
-  const keys = scene.input.keyboard!;
-  const handled = new WeakSet<KeyboardEvent>();
-  const cheat = (code: number, fn: () => void) =>
-    keys.addKey(code).on(Phaser.Input.Keyboard.Events.DOWN, (_key: Phaser.Input.Keyboard.Key, event: KeyboardEvent) => {
-      if (handled.has(event)) return;
-      handled.add(event);
-      fn();
-    });
+  // 作弊鍵：1＝MP 全滿、2＝HP 全滿、3＝無敵切換、4＝這張地圖的敵人 HP 全部歸零（開門用）、`＝切換上面的顯示。
+  // 切換類的鍵按一下只能切一次：onKey 用事件物件去重
+  const cheat = (code: number, fn: () => void) => onKey(scene, code, fn);
   cheat(KEY.ONE, () => (hero.logic.mp = HERO.mpMax));
   cheat(KEY.TWO, () => (hero.logic.hp = HERO.hpMax));
   cheat(KEY.THREE, () => (hero.logic.invincible = !hero.logic.invincible));
+  cheat(KEY.FOUR, () => {
+    for (const e of scene.enemies) {
+      e.logic.hp = 0;
+      e.logic.dying = true;
+      hurtEnemy(e.logic, 0);
+    }
+  });
   cheat(KEY.BACKTICK, () => (shown = !shown));
 
   window.__game = {
@@ -141,15 +176,35 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
           mp: hero.logic.mp,
           invincible: hero.logic.invincible,
         },
-        enemies: scene.grunts.map((g) => ({ x: g.x, y: g.y, state: GruntState[g.logic.state], facing: g.logic.facing, hp: g.logic.hp })),
+        enemies: scene.enemies.map((e) => ({
+          kind: e.logic.kind,
+          x: e.x,
+          y: e.y,
+          state: EnemyState[e.logic.state],
+          facing: e.logic.facing,
+          hp: e.logic.hp,
+          armor: { ...e.logic.armor },
+        })),
+        items: scene.items.map((i) => ({ kind: i.kind, x: i.sprite.x, y: i.sprite.y })),
+        mpFromHits,
+        bullets: scene.bullets.map((b) => ({ x: b.p.x, y: b.p.y })),
         waves: scene.waves.map((w) => ({ x: w.sprite.x, y: w.sprite.y, fromX: w.fromX })),
         wavesSpawned: scene.wavesSpawned,
         devShown: shown,
         cameraX: scene.cameras.main.scrollX,
         tick: hero.logic.tick,
+        map: scene.entry.map,
+        entry: { hp: scene.entry.hp, mp: scene.entry.mp },
+        doorOpen: scene.isDoorOpen(),
+        complete: scene.complete,
+        paused: scene.scene.isPaused(),
       };
     },
-    pause: () => scene.scene.pause(),
-    resume: () => scene.scene.resume(),
+    // 除錯函式都不回傳值：Playwright 會把 evaluate 的回傳值序列化傳回測試，ScenePlugin 這種大物件要花好幾秒，期間遊戲照跑
+    pause: () => void scene.scene.pause(),
+    resume: () => void scene.scene.resume(),
+    setHp: (hp) => void (hero.logic.hp = hp),
+    enter: (map, hp = hero.logic.hp, mp = hero.logic.mp) => void scene.scene.restart({ map, hp, mp }),
+    placeHero: (x) => hero.body.reset(x, GROUND_Y),
   };
 }

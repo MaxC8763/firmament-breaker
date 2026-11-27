@@ -1,0 +1,57 @@
+{
+  "canvas": [
+    320,
+    320
+  ],
+  "pivot": [
+    160,
+    300
+  ],
+  "scale": 2,
+  "fps": 12,
+  "loop": false,
+  "frames": [
+    {
+      "file": "attack_00",
+      "hold": 2,
+      "grounded": true,
+      "phase": "startup"
+    },
+    {
+      "file": "attack_01",
+      "hold": 2,
+      "grounded": true,
+      "phase": "startup"
+    },
+    {
+      "file": "attack_02",
+      "hold": 3,
+      "grounded": true,
+      "phase": "startup"
+    },
+    {
+      "file": "attack_03",
+      "hold": 1,
+      "grounded": true,
+      "phase": "active"
+    },
+    {
+      "file": "attack_04",
+      "hold": 1,
+      "grounded": true,
+      "phase": "active"
+    },
+    {
+      "file": "attack_05",
+      "hold": 2,
+      "grounded": true,
+      "phase": "recovery"
+    },
+    {
+      "file": "attack_06",
+      "hold": 2,
+      "grounded": true,
+      "phase": "recovery"
+    }
+  ]
+}

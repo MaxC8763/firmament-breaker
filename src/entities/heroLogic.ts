@@ -1,7 +1,9 @@
 // 主角的決策：不 import phaser。每個 tick 收輸入與著地狀態，決定狀態、要交給物理的速度、要顯示哪一格
+import { addMp } from '../combat/attack';
 import type { ArtFrame, ArtGroup } from '../data/manifest';
-import { GRAVITY, HERO, TICK_HZ, ticks } from '../data/tuning';
+import { GRAVITY, HERO, ITEM, TICK_HZ, ticks } from '../data/tuning';
 import {
+  anyButton,
   bufferPresses,
   direction,
   newRunTracker,
@@ -24,7 +26,14 @@ export enum HeroState {
   Hurt,
   /** HP 歸零，播完死亡動畫就要求重來 */
   Dead,
+  /** 不動太久：打盹轉場接著打盹循環 */
+  Doze,
+  /** 打盹中按了遊戲鍵：播完驚醒才能行動 */
+  Wake,
 }
+
+/** 站在地上、腳下沒了就會往下掉的狀態 */
+const GROUNDED = new Set([HeroState.Idle, HeroState.Walk, HeroState.Run, HeroState.Slide]);
 
 /** X 連段的三招；X3 沒有下一招 */
 export type XMove = 'x1' | 'x2' | 'x3';
@@ -69,6 +78,8 @@ export interface HeroLogic {
   airTicks: number;
   /** 二段跳後經過的 tick；沒有二段跳是 Infinity */
   doubleJumpTicks: number;
+  /** 走出平台邊緣後，按 Z 還算一般跳的剩餘 tick */
+  coyoteTicks: number;
   /** 落地後還要顯示落地格的 tick 數 */
   landTicks: number;
   attack: Attack | null;
@@ -86,8 +97,10 @@ export interface HeroLogic {
   airVy: number;
   hp: number;
   mp: number;
-  /** 目前狀態經過的 tick（受擊、死亡） */
+  /** 目前狀態經過的 tick（受擊、死亡、打盹、驚醒） */
   stateTicks: number;
+  /** 在地面待機、沒按任何遊戲鍵經過的 tick；滿 dozeMs 就打盹 */
+  idleTicks: number;
   /** 受擊後的無敵還剩幾個 tick */
   invulnTicks: number;
   /** 被擊退的方向 */
@@ -101,6 +114,8 @@ export interface HeroLogic {
 export interface HeroInput {
   frame: InputFrame;
   onGround: boolean;
+  /** 腳下踩的是單向平台（不是地面） */
+  onPlatform: boolean;
   /** 物理目前的垂直速度（+＝向下） */
   vy: number;
   /** 物理上一步被擋住的方向（牆、地圖兩端） */
@@ -114,6 +129,8 @@ export interface HeroOutput {
   gravity: boolean;
   /** X3 判定開始的那個 tick：生成真空切劍氣 */
   spawnWave?: boolean;
+  /** ↓＋Z：穿過腳下的單向平台往下掉 */
+  dropThrough?: boolean;
 }
 
 /**
@@ -173,6 +190,7 @@ export const newHero = (moves: HeroMoves): HeroLogic => ({
   airDir: 0,
   airTicks: 0,
   doubleJumpTicks: Infinity,
+  coyoteTicks: 0,
   landTicks: 0,
   attack: null,
   airAttackUsed: false,
@@ -184,6 +202,7 @@ export const newHero = (moves: HeroMoves): HeroLogic => ({
   hp: HERO.hpMax,
   mp: 0,
   stateTicks: 0,
+  idleTicks: 0,
   invulnTicks: 0,
   knockDir: 0,
   invincible: false,
@@ -206,6 +225,14 @@ export function hurtHero(h: HeroLogic, damage: number, dir: number): boolean {
   return true;
 }
 
+/** 吃道具：HP +300、MP +100，超過上限的部分捨去，滿了也照吃；死亡時不吃。回傳有沒有吃掉 */
+export function eatItem(h: HeroLogic, kind: 'hp' | 'mp'): boolean {
+  if (h.state === HeroState.Dead) return false;
+  if (kind === 'hp') h.hp = Math.min(HERO.hpMax, h.hp + ITEM.hp);
+  else h.mp = addMp(h.mp, ITEM.mp);
+  return true;
+}
+
 export function tickHero(h: HeroLogic, input: HeroInput): HeroOutput {
   const out = decide(h, input);
   h.lastVx = out.vx;
@@ -220,6 +247,10 @@ function decide(h: HeroLogic, input: HeroInput): HeroOutput {
   h.vy = input.vy;
   const dir = direction(f);
   if (h.invulnTicks > 0) h.invulnTicks--;
+  if (h.coyoteTicks > 0) h.coyoteTicks--;
+  if (h.state !== HeroState.Idle || anyButton(f)) h.idleTicks = 0;
+  // MP 自然回復：邏輯有前進才回（暫停、命中停頓不跑 tick），死亡時不回
+  if (h.state !== HeroState.Dead && t % (TICK_HZ / HERO.mpPerSecond) === 0) h.mp = addMp(h.mp, 1);
   // 往滑行的方向被擋住（撞牆、到了地圖兩端），滑行就結束
   if (h.slideV > 0 && (h.facing > 0 ? input.blocked.right : input.blocked.left)) h.slideV = 0;
   // 地面滑行每個 tick 減速；按著反方向減速更快
@@ -236,11 +267,20 @@ function decide(h: HeroLogic, input: HeroInput): HeroOutput {
         if (input.onGround) h.doubleJumped = h.airAttackUsed = false;
       }
       return { vx: h.knockDir * KNOCK_SPEED, vy: null, gravity: true };
+    case HeroState.Doze:
+    case HeroState.Wake:
+      return doze(h, f);
   }
 
   if (h.state === HeroState.Attack) {
     const out = attacking(h, input);
     if (out) return out;
+  }
+
+  // 走、跑、滑行出平台邊緣：進入空中往下掉，coyoteMs 內按 Z 還是一般跳。往下的速度擋掉剛開場、物理還沒跑過的那個 tick
+  if (GROUNDED.has(h.state) && !input.onGround && input.vy > 0) {
+    takeoff(h, dir);
+    h.coyoteTicks = ticks(HERO.coyoteMs);
   }
 
   if (h.state === HeroState.Air) {
@@ -259,6 +299,8 @@ function decide(h: HeroLogic, input: HeroInput): HeroOutput {
   }
   if (takeBuffered(h.buffer, 'jump', t)) {
     takeoff(h, dir);
+    // 站在單向平台上 ↓＋Z：往下穿過、不起跳
+    if (f.held.down && input.onPlatform) return { ...air(h, f, dir), dropThrough: true };
     return air(h, f, dir, JUMP_SPEED);
   }
   if (h.state === HeroState.Slide) {
@@ -275,8 +317,24 @@ function decide(h: HeroLogic, input: HeroInput): HeroOutput {
   if (dir) h.facing = dir > 0 ? 1 : -1;
   h.state = !dir ? HeroState.Idle : h.run.runDir === dir ? HeroState.Run : HeroState.Walk;
   if (dir) h.landTicks = 0;
+  // 不動 10 秒就打盹
+  if (h.state === HeroState.Idle && ++h.idleTicks >= ticks(HERO.dozeMs)) {
+    h.state = HeroState.Doze;
+    h.stateTicks = 0;
+  }
   const speed = h.state === HeroState.Run ? HERO.runSpeed : HERO.walkSpeed;
   return { vx: dir * speed, vy: null, gravity: true };
+}
+
+/** 打盹：按任何遊戲鍵就驚醒；打盹與驚醒期間按的鍵留在預先輸入裡（不過期），驚醒後照常生效 */
+function doze(h: HeroLogic, f: InputFrame): HeroOutput {
+  for (const b of h.buffer) b.tick = h.tick;
+  h.stateTicks++;
+  if (h.state === HeroState.Doze && anyButton(f)) {
+    h.state = HeroState.Wake;
+    h.stateTicks = 0;
+  } else if (h.state === HeroState.Wake && h.stateTicks >= lengthOf(h.moves['hero/wake'])) h.state = HeroState.Idle;
+  return { vx: 0, vy: null, gravity: true };
 }
 
 /** 從跑速開始滑行：等減速，滑 brakeDistance 停下 */
@@ -323,8 +381,11 @@ function attacking(h: HeroLogic, input: HeroInput): HeroOutput | null {
   if (frame) return attackOutput(h);
 
   h.attack = null;
-  // 招式結束時還在滑，就回到滑行
-  h.state = a.air && !a.landed && !input.onGround ? HeroState.Air : h.slideV > 0 ? HeroState.Slide : HeroState.Idle;
+  if (!input.onGround) {
+    // 地面招式被帶出平台邊緣：照一般重力掉下來，做完時在空中就照走出邊緣進入空中（沒有 coyote time）
+    if (!a.air || a.landed) takeoff(h, 0);
+    h.state = HeroState.Air;
+  } else h.state = h.slideV > 0 ? HeroState.Slide : HeroState.Idle; // 招式結束時還在滑，就回到滑行
   return null;
 }
 
@@ -365,6 +426,7 @@ function takeoff(h: HeroLogic, dir: number) {
   h.state = HeroState.Air;
   h.airTicks = 0;
   h.doubleJumpTicks = Infinity;
+  h.coyoteTicks = 0;
   h.jumpCut = false;
   h.landTicks = 0;
 }
@@ -384,6 +446,10 @@ function air(h: HeroLogic, f: InputFrame, dir: number, launch?: number): HeroOut
     return startAttack(h, 'x1', true);
   }
   let vy: number | null = launch === undefined ? null : -launch;
+  if (vy === null && h.coyoteTicks > 0 && takeBuffered(h.buffer, 'jump', h.tick)) {
+    h.coyoteTicks = 0;
+    vy = -JUMP_SPEED;
+  }
   if (vy === null && !h.doubleJumped && takeBuffered(h.buffer, 'jump', h.tick)) {
     h.doubleJumped = true;
     h.jumpCut = false;
@@ -435,6 +501,13 @@ export function heroView(h: HeroLogic): HeroView {
     case HeroState.Slide:
       // 跑步煞車還沒有圖，先借用落地格
       return jump('land');
+    case HeroState.Doze: {
+      // 打盹轉場播完才進打盹循環（循環交給薄殼播）
+      const into = frameAt(h.moves['hero/doze_in'], h.stateTicks);
+      return into ? { anim: 'hero/doze_in', frame: into.file } : { anim: 'hero/doze' };
+    }
+    case HeroState.Wake:
+      return { anim: 'hero/wake', frame: frameAt(h.moves['hero/wake'], h.stateTicks)?.file ?? h.moves['hero/wake'].frames?.at(-1)?.file };
     case HeroState.Walk:
       return { anim: 'hero/walk' };
     case HeroState.Run:

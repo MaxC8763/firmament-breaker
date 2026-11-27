@@ -19,6 +19,16 @@
     "grunt": {
       "body":    { "type": "rect", "x": -60, "y": -128, "w": 120, "h": 128 },
       "hurtbox": { "type": "rect", "x": -66, "y": -140, "w": 132, "h": 140 }
+    },
+    "gunner": {
+      "body":    { "type": "rect", "x": -64, "y": -124, "w": 120, "h": 124 },
+      "hurtbox": { "type": "rect", "x": -72, "y": -136, "w": 136, "h": 136 },
+      "bullet":  { "type": "rect", "x": -16, "y": -16, "w": 32, "h": 32 }
+    },
+    "heavy": {
+      "body":    { "type": "rect", "x": -80, "y": -190, "w": 160, "h": 190 },
+      "hurtbox": { "type": "rect", "x": -88, "y": -204, "w": 176, "h": 204 },
+      "attack":  { "type": "rect", "x": 80, "y": -190, "w": 160, "h": 190 }
     }
   }
 }
