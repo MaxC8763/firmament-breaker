@@ -30,6 +30,7 @@
       #fields label { margin-right: 6px; }
       #fields input { width: 64px; }
       #shared { color: #555; }
+      #status.warn { color: #8a6500; font-weight: bold; }
     </style>
   </head>
   <body>
@@ -51,6 +52,7 @@
         <span id="boxlist"></span>
         <span id="fields"></span>
         <span id="shared"></span>
+        <span><button id="save" disabled>儲存（Ctrl+S）</button> <button id="discard" disabled>放棄修改</button> <span id="status"></span></span>
       </div>
       <canvas id="stage"></canvas>
       <div id="info"></div>

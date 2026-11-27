@@ -14,6 +14,7 @@ const state = {
   mode: 'action', expression: 'normal',
   group: null, index: 0, playing: false, flipped: false, zoom: 1, drawn: null,
   selected: null, dragging: null, // selected 記框的角色，換格時選取跟著角色走
+  base: '', baseJson: '', message: '', // base＝讀到的判定框檔原文，存檔時送回去讓伺服器確認檔案沒在工具外被改過
 };
 
 const animGroups = () => Object.keys(state.manifest.groups).filter((g) => state.manifest.groups[g].frames);
@@ -39,6 +40,55 @@ async function refresh() {
   state.index = Math.max(0, Math.min(state.index, frames().length - 1));
   renderList();
   renderExpressions();
+  draw();
+}
+
+// ---------- 判定框：讀檔、存檔、放棄修改；沒有未儲存的修改時每秒重讀，在工具外改的檔也會換新 ----------
+async function loadHitboxes() {
+  const text = await (await fetch('hitboxes.json', { cache: 'no-store' })).text();
+  state.hitboxes = JSON.parse(text);
+  state.base = text;
+  state.baseJson = JSON.stringify(state.hitboxes);
+}
+const dirty = () => !!state.hitboxes && JSON.stringify(state.hitboxes) !== state.baseJson;
+
+async function pollHitboxes() {
+  if (dirty() || state.dragging) return;
+  try {
+    const text = await (await fetch('hitboxes.json', { cache: 'no-store' })).text();
+    if (text === state.base || dirty() || state.dragging) return;
+    state.hitboxes = JSON.parse(text);
+    state.base = text;
+    state.baseJson = JSON.stringify(state.hitboxes);
+  } catch {
+    return; // 檔案正寫到一半、或暫時不是合法的 JSON：下一秒再試
+  }
+  draw();
+}
+
+async function save() {
+  if (!dirty()) return;
+  try {
+    const res = await fetch('hitboxes.json', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ base: state.base, data: state.hitboxes }),
+    });
+    const body = await res.json();
+    if (res.ok) {
+      state.base = body.text;
+      state.baseJson = JSON.stringify(JSON.parse(body.text));
+    }
+    state.message = res.ok ? '已儲存' : `沒有存：${body.error}`;
+  } catch (e) {
+    state.message = `沒有存：${e.message}`;
+  }
+  draw();
+}
+
+async function discard() {
+  await loadHitboxes();
+  state.message = '已放棄修改';
   draw();
 }
 
@@ -182,7 +232,10 @@ function boxesFor(f) {
 }
 const currentBoxes = () => boxesFor(frames()[state.index]);
 const selectedBox = () => currentBoxes().find((b) => b.role === state.selected);
-const setShape = (path, shape) => (get(state.hitboxes, path.slice(0, -1))[path.at(-1)] = shape);
+function setShape(path, shape) {
+  get(state.hitboxes, path.slice(0, -1))[path.at(-1)] = shape;
+  state.message = '';
+}
 
 function drawActionMode() {
   const m = meta();
@@ -277,6 +330,11 @@ function renderEdit(boxes) {
   const hint = boxes.length ? '點畫布上的框選取：拖框內移動，拖白色控制點改大小' : '';
   const shared = sel?.role === 'attack' ? `共用框 ${sel.path.at(-1)}：${usersOf(sel.path.at(-1)).join('、')} 的判定格都用它` : '';
   $('shared').textContent = sel ? shared : hint;
+  const changed = dirty();
+  $('save').disabled = !changed;
+  $('discard').disabled = !changed;
+  $('status').textContent = changed ? ['未儲存', state.message].filter(Boolean).join('　') : state.message;
+  $('status').classList.toggle('warn', changed);
 }
 
 const usersOf = (attack) => Object.keys(state.hitboxes.byAction).filter((a) => state.hitboxes.byAction[a] === attack);
@@ -402,6 +460,11 @@ function togglePlay() {
 }
 
 addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS') {
+    e.preventDefault(); // 不要跳出瀏覽器的「另存網頁」
+    save();
+    return;
+  }
   if (!state.manifest || state.mode !== 'action') return;
   if (e.target instanceof HTMLInputElement && e.target.type === 'number') return; // 在數字欄打字時，按鍵留給欄位
   if (e.code === 'Space') togglePlay();
@@ -413,6 +476,14 @@ addEventListener('keydown', (e) => {
   draw();
 });
 $('play').onclick = togglePlay;
+$('save').onclick = save;
+$('discard').onclick = discard;
+// 有未儲存的修改時關分頁或重新整理，瀏覽器會先問
+addEventListener('beforeunload', (e) => {
+  if (!dirty()) return;
+  e.preventDefault();
+  e.returnValue = '';
+});
 for (const b of document.querySelectorAll('[data-zoom]'))
   b.onclick = () => {
     state.zoom = Number(b.dataset.zoom);
@@ -440,11 +511,15 @@ window.__align = {
       source: img?.source ?? null, ground: img?.ground ?? null,
       warnings: f ? checkFrame(state.manifest, state.group, f) : [], warningCount,
       selected: sel ? { role: sel.role, path: sel.path.join('.'), shape: structuredClone(sel.shape) } : null,
+      dirty: dirty(), message: state.message,
     };
   },
 };
 
-state.hitboxes = await (await fetch('hitboxes.json', { cache: 'no-store' })).json();
+await loadHitboxes();
 await refresh();
-setInterval(refresh, 1000);
+setInterval(() => {
+  refresh();
+  pollHitboxes();
+}, 1000);
 requestAnimationFrame(loop);
