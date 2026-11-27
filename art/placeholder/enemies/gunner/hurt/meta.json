@@ -1,0 +1,25 @@
+{
+  "canvas": [
+    256,
+    256
+  ],
+  "pivot": [
+    128,
+    236
+  ],
+  "scale": 2,
+  "fps": 12,
+  "loop": false,
+  "frames": [
+    {
+      "file": "hurt_00",
+      "hold": 2,
+      "grounded": true
+    },
+    {
+      "file": "hurt_01",
+      "hold": 2,
+      "grounded": true
+    }
+  ]
+}

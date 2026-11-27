@@ -1,0 +1,20 @@
+{
+  "canvas": [
+    96,
+    96
+  ],
+  "pivot": [
+    48,
+    92
+  ],
+  "scale": 2,
+  "fps": 12,
+  "loop": false,
+  "frames": [
+    {
+      "file": "hp_00",
+      "hold": 1,
+      "grounded": true
+    }
+  ]
+}

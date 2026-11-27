@@ -1,0 +1,25 @@
+{
+  "canvas": [
+    64,
+    64
+  ],
+  "pivot": [
+    32,
+    32
+  ],
+  "scale": 2,
+  "fps": 12,
+  "loop": true,
+  "frames": [
+    {
+      "file": "bullet_00",
+      "hold": 2,
+      "grounded": false
+    },
+    {
+      "file": "bullet_01",
+      "hold": 2,
+      "grounded": false
+    }
+  ]
+}

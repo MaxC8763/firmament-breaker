@@ -384,40 +384,42 @@ function gruntSVG({ lean = 0, squash = 1, feet = [0, 0], eyes = 'open' }) {
   ];
   const horn = [shape(poly([[-16, by - h + 8], [-2, by - h - 26], [12, by - h + 6]], true))];
   const ex = 30, ey = by - h * 0.25, k = squash;
-  const stroke = (d) => `<path d="${d}" fill="none" stroke="${COL.line}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
-  let face;
-  if (eyes === 'open') {
-    face = [ex, ex + 24].map((x) =>
-      `<ellipse cx="${x}" cy="${n(ey)}" rx="8" ry="${n(11 * k)}" fill="#ffffff" stroke="${COL.line}" stroke-width="3"/>` +
-      `<circle cx="${x + 3}" cy="${n(ey + 2 * k)}" r="4.5" fill="${COL.line}"/>`).join('') +
-      stroke(poly([[ex - 9, ey - 16 * k], [ex + 8, ey - 11 * k]])) + stroke(poly([[ex + 16, ey - 11 * k], [ex + 33, ey - 16 * k]]));
-  } else if (eyes === 'hurt') {
-    face = stroke(poly([[ex - 7, ey - 8], [ex + 5, ey], [ex - 7, ey + 8]])) + stroke(poly([[ex + 31, ey - 8], [ex + 19, ey], [ex + 31, ey + 8]]));
-  } else {
-    face = [ex, ex + 24].map((x) => stroke(`M ${x - 6},${n(ey - 6 * k)} L ${x + 6},${n(ey + 6 * k)} M ${x + 6},${n(ey - 6 * k)} L ${x - 6},${n(ey + 6 * k)}`)).join('');
-  }
-  const mouth = stroke(poly([[ex + 2, by + h * 0.25], [ex + 22, by + h * 0.25]]));
+  const mouth = strokeSVG(poly([[ex + 2, by + h * 0.25], [ex + 22, by + h * 0.25]]));
   const belly = `<ellipse cx="14" cy="${n(by + h * 0.35)}" rx="34" ry="${n(h * 0.45)}" fill="${GRUNT_COL.belly}"/>`;
   return {
     lean,
-    inner: group(horn, OUTLINE, GRUNT_COL.horn) + group(body, OUTLINE, GRUNT_COL.body) + belly + face + mouth,
+    inner: group(horn, OUTLINE, GRUNT_COL.horn) + group(body, OUTLINE, GRUNT_COL.body) + belly + enemyFace(eyes, ex, ey, k) + mouth,
   };
 }
 
-const gruntDoc = ({ lean, inner }, oy) =>
-  svgDoc(GRUNT.w, GRUNT.h, `<g transform="translate(${GRUNT.px} ${n(GRUNT.py + oy)}) rotate(${n(lean)} 0 -10)">${inner}</g>`);
+const strokeSVG = (d) => `<path d="${d}" fill="none" stroke="${COL.line}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
 
-/** 貼地：和主角一樣，最下緣不透明像素剛好碰到地平線 */
-async function renderGruntFrame(pose, label) {
-  const g = gruntSVG(pose);
-  const groundRow = GRUNT.py * SCALE - 1;
+/** 雜兵的一對眼睛：ex、ey＝後面那隻眼睛的中心，前面那隻在 ex＋24；eyes＝open／hurt／dead；k＝上下壓扁 */
+function enemyFace(eyes, ex, ey, k = 1) {
+  if (eyes === 'open')
+    return [ex, ex + 24].map((x) =>
+      `<ellipse cx="${x}" cy="${n(ey)}" rx="8" ry="${n(11 * k)}" fill="#ffffff" stroke="${COL.line}" stroke-width="3"/>` +
+      `<circle cx="${x + 3}" cy="${n(ey + 2 * k)}" r="4.5" fill="${COL.line}"/>`).join('') +
+      strokeSVG(poly([[ex - 9, ey - 16 * k], [ex + 8, ey - 11 * k]])) + strokeSVG(poly([[ex + 16, ey - 11 * k], [ex + 33, ey - 16 * k]]));
+  if (eyes === 'hurt')
+    return strokeSVG(poly([[ex - 7, ey - 8], [ex + 5, ey], [ex - 7, ey + 8]])) + strokeSVG(poly([[ex + 31, ey - 8], [ex + 19, ey], [ex + 31, ey + 8]]));
+  return [ex, ex + 24].map((x) => strokeSVG(`M ${x - 6},${n(ey - 6 * k)} L ${x + 6},${n(ey + 6 * k)} M ${x + 6},${n(ey - 6 * k)} L ${x - 6},${n(ey + 6 * k)}`)).join('');
+}
+
+/** 腳底 pivot 在 (C.px, C.py) 的畫布；lean 以腳底上方 10 px 為軸 */
+const pivotDoc = (C, { lean = 0, inner }, oy) =>
+  svgDoc(C.w, C.h, `<g transform="translate(${C.px} ${n(C.py + oy)}) rotate(${n(lean)} 0 -10)">${inner}</g>`);
+
+/** 雜兵與道具貼地：和主角一樣，最下緣不透明像素剛好碰到地平線 */
+async function renderGrounded(C, g, label) {
+  const groundRow = C.py * SCALE - 1;
   let oy = 0;
   for (let i = 0; i < 5; i++) {
-    const low = await lowestOpaqueRow(gruntDoc(g, oy));
+    const low = await lowestOpaqueRow(pivotDoc(C, g, oy));
     if (low < 0 || low === groundRow) break;
     oy += (groundRow - low) / SCALE;
   }
-  const doc = gruntDoc(g, oy);
+  const doc = pivotDoc(C, g, oy);
   const low = await lowestOpaqueRow(doc);
   if (low !== groundRow) console.warn(`⚠ ${label}：最下緣在第 ${low} 列（應為 ${groundRow}）`);
   return toPng(doc);
@@ -429,6 +431,102 @@ const GRUNT_ACTIONS = {
   hurt: A([F(2, { lean: -14, eyes: 'hurt' }), F(2, { lean: -7, eyes: 'hurt' })]),
   death: A([F(2, { lean: -14, eyes: 'hurt' }), F(2, { squash: 0.7, eyes: 'dead' }), F(4, { squash: 0.4, eyes: 'dead' })]),
 };
+
+// ---------------- 雜兵 B 砲手：不動，身體前方一支砲管；砲口在腳底前方約 90、上方 110 ----------------
+const GUNNER = { w: 256, h: 256, px: 128, py: 236 };
+const GUNNER_COL = { body: '#8fb3d9', belly: '#dce8f5', barrel: '#5d6570', flash: '#ffd84d' };
+
+/** recoil＝砲管往後縮；flash＝砲口火光；charge＝砲口發亮（預備） */
+function gunnerSVG({ lean = 0, squash = 1, recoil = 0, flash = false, charge = false, eyes = 'open' }) {
+  const h = 52 * squash, by = -14 - h;
+  const body = [ellipse([-26, -10], 22, 11), ellipse([26, -10], 22, 11), ellipse([-8, by], 62, h)];
+  const muzzle = [92 - recoil, -110];
+  const barrel = [cap([16 - recoil, -110], muzzle, 16), ellipse(muzzle, 8, 20)];
+  const glow = charge ? `<circle cx="${n(muzzle[0])}" cy="${muzzle[1]}" r="10" fill="${GUNNER_COL.flash}"/>` : '';
+  const fire = flash
+    ? `<path d="${poly([[100, -126], [110, -114], [122, -110], [110, -106], [100, -94], [104, -110]], true)}" fill="${GUNNER_COL.flash}" stroke="${COL.line}" stroke-width="3" stroke-linejoin="round"/>`
+    : '';
+  const belly = `<ellipse cx="2" cy="${n(by + h * 0.35)}" rx="32" ry="${n(h * 0.42)}" fill="${GUNNER_COL.belly}"/>`;
+  return {
+    lean,
+    inner: group(body, OUTLINE, GUNNER_COL.body) + belly + enemyFace(eyes, -6, by - h * 0.15, squash) + group(barrel, OUTLINE, GUNNER_COL.barrel) + glow + fire,
+  };
+}
+
+// 射擊：預備（砲口發亮）→ 發射格（火光，這一格生成彈丸）→ 收招（後座力）
+const GUNNER_ACTIONS = {
+  idle: A([F(6), F(6, { squash: 0.96 })], { loop: true }),
+  attack: A([
+    F(2, { charge: true, lean: -3 }, { phase: S }), F(2, { charge: true, lean: -5 }, { phase: S }),
+    F(1, { flash: true, recoil: 4 }, { phase: ACT }),
+    F(2, { recoil: 12, lean: -6 }, { phase: REC }), F(2, { recoil: 4 }, { phase: REC }),
+  ]),
+  hurt: A([F(2, { lean: -14, eyes: 'hurt' }), F(2, { lean: -7, eyes: 'hurt' })]),
+  death: A([F(2, { lean: -14, eyes: 'hurt' }), F(2, { squash: 0.7, eyes: 'dead' }), F(4, { squash: 0.4, eyes: 'dead' })]),
+};
+
+/** 彈丸：深色的球，亮點轉一圈；pivot 在中心 */
+function bulletSVG(k) {
+  const a = rad(k * 90);
+  return `<circle cx="32" cy="32" r="18" fill="${GUNNER_COL.barrel}" stroke="${COL.line}" stroke-width="3"/>` +
+    `<circle cx="${n(32 + 8 * Math.cos(a))}" cy="${n(32 + 8 * Math.sin(a))}" r="5" fill="#ffffff"/>`;
+}
+
+// ---------------- 雜兵 C 重甲兵：大塊頭、頭盔與肩甲，手上一根狼牙棒 ----------------
+const HEAVY = { w: 320, h: 320, px: 160, py: 300 };
+const HEAVY_COL = { body: '#8a8f99', armor: '#cfd3db', club: '#7a5636', belly: '#b9bec7' };
+
+/** club＝狼牙棒的方向（0＝朝下、90＝朝前、180＝朝上，超過 180 是舉到背後） */
+function heavySVG({ lean = 0, squash = 1, club = 40, feet = [0, 0], eyes = 'open' }) {
+  const h = 88 * squash, by = -18 - h;
+  const body = [ellipse([-36 + feet[0], -14], 30, 14), ellipse([36 + feet[1], -14], 30, 14), ellipse([0, by], 90, h)];
+  const helmet = [ellipse([4, by - h + 14], 62, 30), ellipse([-52, by - h * 0.35], 30, 22), ellipse([54, by - h * 0.35], 30, 22)];
+  const hand = [40, by + 8];
+  const tip = add(hand, dir(club), 70);
+  const stick = [cap(hand, tip, 8)];
+  const head = [circle(tip, 20)];
+  const spikes = [0, 60, 120, 180, 240, 300].map((d) => {
+    const u = dir(club + d);
+    return `<circle cx="${n(tip[0] + 22 * u[0])}" cy="${n(tip[1] + 22 * u[1])}" r="4" fill="${COL.line}"/>`;
+  }).join('');
+  const belly = `<ellipse cx="10" cy="${n(by + h * 0.3)}" rx="54" ry="${n(h * 0.48)}" fill="${HEAVY_COL.belly}"/>`;
+  return {
+    lean,
+    inner: group(body, OUTLINE, HEAVY_COL.body) + belly + group(helmet, OUTLINE, HEAVY_COL.armor) +
+      enemyFace(eyes, 16, by - h * 0.25, squash) + group(stick, OUTLINE, HEAVY_COL.club) + spikes + group(head, OUTLINE, HEAVY_COL.club),
+  };
+}
+
+// 揮擊：預備 7 格（約 600 ms）把狼牙棒舉到背後、身體後仰蓄力 → 判定 2 格往前砸 → 收招 4 格
+const HEAVY_ACTIONS = {
+  idle: A([F(6), F(6, { squash: 0.97 })], { loop: true }),
+  move: A([F(3, { feet: [10, -10], lean: 3 }), F(3, { squash: 0.97 }), F(3, { feet: [-10, 10], lean: 3 }), F(3, { squash: 0.97 })], { loop: true }),
+  attack: A([
+    F(2, { club: 120, lean: -4 }, { phase: S }), F(2, { club: 180, lean: -8 }, { phase: S }), F(3, { club: 215, lean: -12, squash: 0.96 }, { phase: S }),
+    F(1, { club: 110, lean: 8 }, { phase: ACT }), F(1, { club: 70, lean: 12 }, { phase: ACT }),
+    F(2, { club: 50, lean: 8 }, { phase: REC }), F(2, { club: 40 }, { phase: REC }),
+  ]),
+  hurt: A([F(2, { lean: -10, eyes: 'hurt' }), F(2, { lean: -5, eyes: 'hurt' })]),
+  death: A([F(2, { lean: -10, eyes: 'hurt' }), F(2, { squash: 0.75, eyes: 'dead' }), F(4, { squash: 0.45, eyes: 'dead' })]),
+};
+
+const ENEMIES = {
+  grunt: { C: GRUNT, svg: gruntSVG, actions: GRUNT_ACTIONS },
+  gunner: { C: GUNNER, svg: gunnerSVG, actions: GUNNER_ACTIONS },
+  heavy: { C: HEAVY, svg: heavySVG, actions: HEAVY_ACTIONS },
+};
+
+// ---------------- 道具：地上的藥瓶，HP 紅色加號、MP 藍色菱形 ----------------
+const ITEM = { w: 96, h: 96, px: 48, py: 92 };
+function itemSVG(kind) {
+  const color = kind === 'hp' ? '#e0464e' : '#3e8ef0';
+  const flask = [circle([0, -32], 28), cap([0, -58], [0, -74], 9)];
+  const cork = [cap([-7, -80], [7, -80], 5)];
+  const mark = kind === 'hp'
+    ? `<path d="M -5,-20 h 10 v -7 h 7 v -10 h -7 v -7 h -10 v 7 h -7 v 10 h 7 Z" fill="#ffffff"/>`
+    : `<path d="${poly([[0, -48], [12, -32], [0, -16], [-12, -32]], true)}" fill="#ffffff"/>`;
+  return { inner: group(flask, OUTLINE, color) + group(cork, OUTLINE, COL.guard) + mark };
+}
 
 // ---------------- 特效（各自的畫布與 pivot） ----------------
 function waveSVG(k) {
@@ -567,15 +665,29 @@ async function main() {
     });
   }
 
-  for (const [name, act] of Object.entries(GRUNT_ACTIONS)) {
-    const frames = [];
-    for (const [i, fr] of act.frames.entries()) {
-      const file = `${name}_${id2(i)}`;
-      await put(`enemies/grunt/${name}/${file}.png`, await renderGruntFrame(fr.pose, `grunt/${file}`));
-      frames.push({ file, hold: fr.hold, grounded: true });
+  for (const [id, e] of Object.entries(ENEMIES)) {
+    for (const [name, act] of Object.entries(e.actions)) {
+      const frames = [];
+      for (const [i, fr] of act.frames.entries()) {
+        const file = `${name}_${id2(i)}`;
+        await put(`enemies/${id}/${name}/${file}.png`, await renderGrounded(e.C, e.svg(fr.pose), `${id}/${file}`));
+        frames.push({ file, hold: fr.hold, grounded: true, ...(fr.phase ? { phase: fr.phase } : {}) });
+      }
+      await putJson(`enemies/${id}/${name}/meta.json`, {
+        canvas: [e.C.w, e.C.h], pivot: [e.C.px, e.C.py], scale: SCALE, fps: FPS, loop: !!act.loop, frames,
+      });
     }
-    await putJson(`enemies/grunt/${name}/meta.json`, {
-      canvas: [GRUNT.w, GRUNT.h], pivot: [GRUNT.px, GRUNT.py], scale: SCALE, fps: FPS, loop: !!act.loop, frames,
+  }
+  for (const k of [0, 1]) await put(`enemies/gunner/bullet/bullet_${id2(k)}.png`, await toPng(svgDoc(64, 64, bulletSVG(k))));
+  await putJson('enemies/gunner/bullet/meta.json', {
+    canvas: [64, 64], pivot: [32, 32], scale: SCALE, fps: FPS, loop: true,
+    frames: [0, 1].map((k) => ({ file: `bullet_${id2(k)}`, hold: 2, grounded: false })),
+  });
+  for (const kind of ['hp', 'mp']) {
+    await put(`items/${kind}/${kind}_00.png`, await renderGrounded(ITEM, itemSVG(kind), `items/${kind}`));
+    await putJson(`items/${kind}/meta.json`, {
+      canvas: [ITEM.w, ITEM.h], pivot: [ITEM.px, ITEM.py], scale: SCALE, fps: FPS, loop: false,
+      frames: [{ file: `${kind}_00`, hold: 1, grounded: true }],
     });
   }
 
