@@ -22,4 +22,11 @@ export const HERO = {
   startX: 240,
   walkSpeed: 300,
   runSpeed: 480,
+  /** 空中轉向後、或不是跑跳時的水平速度 */
+  airTurnSpeed: 300,
+  gravity: 3000,
+  /** 起跳速度由高度在 60 Hz 步長下反推 */
+  jumpHeight: 300,
+  doubleJumpHeight: 220,
+  maxFallSpeed: 1500,
 };

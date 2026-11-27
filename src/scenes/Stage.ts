@@ -38,6 +38,8 @@ export class Stage extends Phaser.Scene {
   create() {
     this.drawBackground();
     this.physics.world.setBounds(WALL, 0, WORLD_WIDTH - WALL * 2, GROUND_Y, true, true, false, true);
+    // 物理不自己跟著幀跑：每個邏輯 tick 跑一步，邏輯讀到的永遠是上一步的結果（場景重來會重新連上，所以每次都關）
+    this.physics.disableUpdate();
 
     const manifest: Manifest = this.cache.json.get('manifest');
     this.hero = new Hero(this, manifest);
@@ -70,6 +72,7 @@ export class Stage extends Phaser.Scene {
       for (const b of Object.keys(KEYS) as Button[]) frame.held[b] ||= this.pressed[b];
       this.pressed = noButtons();
       this.hero.step(frame);
+      this.physics.world.singleStep();
     }
     this.hero.show();
   }

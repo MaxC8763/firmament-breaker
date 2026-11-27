@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import type { Manifest } from '../data/manifest';
 import { GROUND_Y } from '../data/tuning';
-import { heroAnim, HeroState } from '../entities/heroLogic';
+import { heroView, HeroState } from '../entities/heroLogic';
 import type { Stage } from '../scenes/Stage';
 
 // 只在開發模式（npm run dev）載入：正式建置裡 import.meta.env.DEV 是 false，這段會被整個拿掉
@@ -52,7 +52,7 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
           y: hero.y,
           // atlas 的格裁掉了透明邊，但 origin 以裁切前的畫布計算：畫布的上緣在 y − displayOriginY
           bottom: box ? hero.y + (box[3] - hero.displayOriginY) * hero.scaleY : null,
-          anim: heroAnim(hero.logic),
+          anim: heroView(hero.logic).anim,
           frame: f.name,
           state: HeroState[hero.logic.state],
           facing: hero.logic.facing,

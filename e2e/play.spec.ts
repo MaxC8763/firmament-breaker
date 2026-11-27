@@ -33,3 +33,24 @@ test('連按兩下 → 跑，鏡頭跟著主角捲動', async ({ page }) => {
   await page.keyboard.up('ArrowRight');
   await until(page, "s.hero.state === 'Idle'");
 });
+
+test('按住 Z 起跳，腳底最高離地 300 px（±10）', async ({ page }) => {
+  // 每幀記下腳底最高到哪
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__top = Infinity;
+    const sample = () => {
+      w.__top = Math.min(w.__top, w.__game.getState().hero.y);
+      requestAnimationFrame(sample);
+    };
+    sample();
+  });
+  await page.keyboard.down('z');
+  await until(page, "s.hero.state === 'Air'");
+  await until(page, "s.hero.state === 'Idle'");
+  await page.keyboard.up('z');
+  const { groundY } = await state(page);
+  const rise = groundY - (await page.evaluate(() => (window as any).__top));
+  console.log(`跳躍高度 ${rise.toFixed(1)} px`);
+  expect(Math.abs(rise - 300)).toBeLessThanOrEqual(10);
+});
