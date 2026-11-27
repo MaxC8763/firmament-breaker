@@ -4,7 +4,7 @@ import type { Box } from '../combat/hitbox';
 import type { Manifest } from '../data/manifest';
 import { GROUND_Y, HERO } from '../data/tuning';
 import type { Grunt } from '../entities/Grunt';
-import { GruntState } from '../entities/gruntLogic';
+import { GruntState, hurtGrunt } from '../entities/gruntLogic';
 import { heroView, HeroState } from '../entities/heroLogic';
 import { HIT_EVENT, type Stage } from '../scenes/Stage';
 
@@ -44,6 +44,13 @@ export interface GameState {
   cameraX: number;
   /** 邏輯跑過的 tick 數 */
   tick: number;
+  /** 第幾張地圖（0 起算） */
+  map: number;
+  /** 進入這張地圖時的 HP／MP：死亡重來用 */
+  entry: { hp: number; mp: number };
+  doorOpen: boolean;
+  /** 關卡完成畫面 */
+  complete: boolean;
 }
 
 declare global {
@@ -53,6 +60,12 @@ declare global {
       /** 暫停與繼續關卡場景（畫面照樣算繪）：瀏覽器測試用來定格截圖 */
       pause(): void;
       resume(): void;
+      /** 設定主角的 HP：不用等被打很久 */
+      setHp(hp: number): void;
+      /** 直接進第 map 張地圖（0 起算）的入口，HP／MP 沒給就照目前的 */
+      enter(map: number, hp?: number, mp?: number): void;
+      /** 把主角放到 x（腳底，地面上） */
+      placeHero(x: number): void;
     };
   }
 }
@@ -103,7 +116,7 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
     scene.events.off(HIT_EVENT, onHit);
   });
 
-  // 作弊鍵：1＝MP 全滿、2＝HP 全滿、3＝無敵切換、`＝切換上面的顯示。按鍵在場景關閉時連同監聽一起移除。
+  // 作弊鍵：1＝MP 全滿、2＝HP 全滿、3＝無敵切換、4＝這張地圖的敵人 HP 全部歸零（開門用）、`＝切換上面的顯示。按鍵在場景關閉時連同監聽一起移除。
   // 鍵盤外掛在同一幀裡收到下一個按鍵時，會把這一幀已經處理過的按鍵事件從頭再處理一次，DOWN 會重複觸發；
   // 切換類的鍵按一下只能切一次，所以用事件物件去重
   const keys = scene.input.keyboard!;
@@ -117,6 +130,13 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
   cheat(KEY.ONE, () => (hero.logic.mp = HERO.mpMax));
   cheat(KEY.TWO, () => (hero.logic.hp = HERO.hpMax));
   cheat(KEY.THREE, () => (hero.logic.invincible = !hero.logic.invincible));
+  cheat(KEY.FOUR, () => {
+    for (const g of scene.grunts) {
+      g.logic.hp = 0;
+      g.logic.dying = true;
+      hurtGrunt(g.logic, 0);
+    }
+  });
   cheat(KEY.BACKTICK, () => (shown = !shown));
 
   window.__game = {
@@ -147,9 +167,16 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
         devShown: shown,
         cameraX: scene.cameras.main.scrollX,
         tick: hero.logic.tick,
+        map: scene.entry.map,
+        entry: { hp: scene.entry.hp, mp: scene.entry.mp },
+        doorOpen: scene.isDoorOpen(),
+        complete: scene.complete,
       };
     },
     pause: () => scene.scene.pause(),
     resume: () => scene.scene.resume(),
+    setHp: (hp) => (hero.logic.hp = hp),
+    enter: (map, hp = hero.logic.hp, mp = hero.logic.mp) => scene.scene.restart({ map, hp, mp }),
+    placeHero: (x) => hero.body.reset(x, GROUND_Y),
   };
 }

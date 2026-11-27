@@ -91,6 +91,4 @@ export const GRUNT = {
   flashMs: 100,
   /** 碰到主角造成的傷害 */
   contactDamage: 50,
-  /** 地圖上的位置：中段到右端 */
-  spawnX: [1600, 2400, 3300],
 };

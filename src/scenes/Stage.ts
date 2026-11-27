@@ -3,13 +3,13 @@ import { addMp, newAttack, strike, type AttackInstance, type AttackSpec, type Hi
 import { attackShape, overlaps, toWorld, type Box, type HitboxData } from '../combat/hitbox';
 import hitboxes from '../data/hitboxes.json';
 import type { Manifest } from '../data/manifest';
-import { MAPS, PLATFORM_THICKNESS } from '../data/maps';
+import { DOOR, doorOpen, LEVEL_START, MAPS, nextEntry, PLATFORM_THICKNESS, type Entry, type MapData } from '../data/maps';
 import { GROUND_Y, GRUNT, HERO, SLASH, TICK_HZ, WAVE, WORLD_WIDTH, ticks } from '../data/tuning';
 import { installDevTools } from '../dev/devTools';
 import { Grunt } from '../entities/Grunt';
 import { gruntHarmful, GruntState, hurtGrunt } from '../entities/gruntLogic';
 import { Hero } from '../entities/Hero';
-import { activeFrame, hurtHero, type Attack } from '../entities/heroLogic';
+import { activeFrame, HeroState, hurtHero, type Attack } from '../entities/heroLogic';
 import { noButtons, type Button, type InputFrame } from '../input/input';
 
 const HITBOXES = hitboxes as unknown as HitboxData;
@@ -48,6 +48,10 @@ const KEYS: Record<Button, number> = {
 };
 
 export class Stage extends Phaser.Scene {
+  /** 這張地圖和進入時的 HP／MP（死亡重來用） */
+  entry: Entry;
+  /** 走進第 3 張的門：關卡停住，等按 Z 再玩一次 */
+  complete: boolean;
   hero: Hero;
   grunts: Grunt[];
   waves: Wave[];
@@ -61,6 +65,10 @@ export class Stage extends Phaser.Scene {
   private restarting: boolean;
   /** ↓＋Z 往下穿時腳底的 y：腳底掉過平台的厚度之前，上緣在這個高度的平台都不擋 */
   private dropY: number | null;
+  private door: Phaser.GameObjects.Graphics;
+  private doorHint: Phaser.GameObjects.Text;
+  /** 門上次畫成開著還是關著；沒變就不重畫 */
+  private doorShown: boolean | null;
   private hud: Phaser.GameObjects.Graphics;
   private mpText: Phaser.GameObjects.Text;
   /** HUD 上次畫的 HP、MP；沒變就不重畫 */
@@ -75,7 +83,11 @@ export class Stage extends Phaser.Scene {
     super('Stage');
   }
 
-  init() {
+  /** 換地圖、死亡重來、從關卡開頭重來都用 scene.restart 帶進入口的值；開機沒帶值就是關卡開頭 */
+  init(data?: Partial<Entry>) {
+    this.entry = data?.map === undefined ? { ...LEVEL_START } : (data as Entry);
+    this.complete = false;
+    this.doorShown = null;
     this.elapsed = 0;
     this.pressed = noButtons();
     this.waves = [];
@@ -88,18 +100,26 @@ export class Stage extends Phaser.Scene {
   }
 
   create() {
-    this.drawBackground();
+    const map = MAPS[this.entry.map];
+    this.drawBackground(map);
     this.physics.world.setBounds(WALL, 0, WORLD_WIDTH - WALL * 2, GROUND_Y, true, true, false, true);
     // 物理不自己跟著幀跑：每個邏輯 tick 跑一步，邏輯讀到的永遠是上一步的結果（場景重來會重新連上，所以每次都關）
     this.physics.disableUpdate();
 
     const manifest: Manifest = this.cache.json.get('manifest');
-    this.grunts = GRUNT.spawnX.map((x) => new Grunt(this, manifest, x));
+    // 門畫在角色後面
+    this.door = this.add.graphics();
+    this.doorHint = this.add
+      .text(DOOR.x, GROUND_Y - DOOR.h - 56, '↑', { fontFamily: 'sans-serif', fontSize: '72px', color: '#ffffff', stroke: '#1b1b1b', strokeThickness: 8 })
+      .setOrigin(0.5);
+    this.grunts = map.enemies.map((e) => new Grunt(this, manifest, e.x));
     this.hero = new Hero(this, manifest);
+    this.hero.logic.hp = this.entry.hp;
+    this.hero.logic.mp = this.entry.mp;
     this.hero.show();
 
     // 單向平台：static body 只開上緣的碰撞，從下面與側面都穿得過；只有主角會踩，敵人只走地面
-    const platforms = MAPS[0].platforms.map((p) => {
+    const platforms = map.platforms.map((p) => {
       const body = this.physics.add.staticBody(p.x, p.top, p.w, PLATFORM_THICKNESS);
       body.checkCollision.down = body.checkCollision.left = body.checkCollision.right = false;
       return body;
@@ -129,12 +149,17 @@ export class Stage extends Phaser.Scene {
   }
 
   update(_time: number, delta: number) {
+    // 關卡完成：關卡停住，按 Z 從關卡開頭再玩一次
+    if (this.complete) {
+      if (this.pressed.jump && !this.restarting) this.leave({ ...LEVEL_START });
+      return;
+    }
     // 每幀只在這裡讀一次鍵盤；剛按下的鍵存到被 tick 讀到為止
     const held = noButtons();
     for (const b of Object.keys(KEYS) as Button[]) held[b] = this.keys[b].isDown;
 
     this.elapsed += Math.min(delta, MAX_DELTA_MS);
-    while (this.elapsed >= TICK_MS && !this.restarting) {
+    while (this.elapsed >= TICK_MS && !this.restarting && !this.complete) {
       this.elapsed -= TICK_MS;
       if (this.hitstop > 0) {
         this.hitstop--;
@@ -149,6 +174,8 @@ export class Stage extends Phaser.Scene {
     this.hero.show();
     for (const g of this.grunts) g.show();
     this.drawHud();
+    const open = this.isDoorOpen();
+    if (open !== this.doorShown) this.drawDoor(open);
   }
 
   /** 一個邏輯 tick：決策 → 物理一步 → 發射物 → 命中 */
@@ -165,11 +192,51 @@ export class Stage extends Phaser.Scene {
     this.contactDamage();
     for (const g of this.grunts) if (g.logic.state === GruntState.Gone) g.destroy();
     this.grunts = this.grunts.filter((g) => g.logic.state !== GruntState.Gone);
-    // 死亡動畫播完：整個場景重來，HP、MP 回到關卡開始的值，小兵也重置
-    if (this.hero.logic.wantsRestart) {
-      this.restarting = true;
-      this.scene.restart();
+    // 站在開著的門前按 ↑：進下一張的入口；最後一張的門是關卡完成
+    const hero = this.hero;
+    if (frame.pressed.up && hero.logic.state !== HeroState.Dead && hero.body.blocked.down && Math.abs(hero.x - DOOR.x) <= DOOR.w / 2 && this.isDoorOpen()) {
+      const next = nextEntry('door', this.entry, hero.logic);
+      if (next) this.leave(next);
+      else this.finish();
     }
+    // 死亡動畫播完：從這張的入口重來，HP、MP 回到進入這張時的值，敵人也重置
+    if (hero.logic.wantsRestart) this.leave(nextEntry('death', this.entry, hero.logic)!);
+  }
+
+  /** 用 entry 的值重開關卡場景；這一幀剩下的 tick 不再跑 */
+  private leave(entry: Entry) {
+    this.restarting = true;
+    this.scene.restart(entry);
+  }
+
+  /** 這張地圖的敵人全部 HP 歸零就開門 */
+  isDoorOpen() {
+    return doorOpen(this.grunts.map((g) => g.logic.hp));
+  }
+
+  /** 門：關著是木門，開著是黑色的門洞，上面顯示「↑」 */
+  private drawDoor(open: boolean) {
+    this.doorShown = open;
+    const left = DOOR.x - DOOR.w / 2;
+    const top = GROUND_Y - DOOR.h;
+    this.door.clear().fillStyle(open ? 0x1b1b1b : 0x7a4a2a).fillRect(left, top, DOOR.w, DOOR.h);
+    this.door.lineStyle(8, 0x1b1b1b).strokeRect(left, top, DOOR.w, DOOR.h);
+    this.doorHint.setVisible(open);
+  }
+
+  /** 關卡完成：關卡停住，畫面中央顯示完成與再玩一次的提示 */
+  private finish() {
+    this.complete = true;
+    const { width, height } = this.scale;
+    this.add.graphics().setScrollFactor(0).setDepth(950).fillStyle(0x000000, 0.55).fillRect(0, 0, width, height);
+    const text = (y: number, s: string, size: number) =>
+      this.add
+        .text(width / 2, y, s, { fontFamily: 'sans-serif', fontSize: `${size}px`, color: '#ffffff', stroke: '#1b1b1b', strokeThickness: 8 })
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(951);
+    text(height / 2 - 60, '關卡完成', 112);
+    text(height / 2 + 70, '按 Z 再玩一次', 44);
   }
 
   /** 小兵碰到主角的 hurtbox 就造成傷害；硬直中、待死亡的小兵不算 */
@@ -272,16 +339,17 @@ export class Stage extends Phaser.Scene {
     this.waves = this.waves.filter((w) => w.age < ticks(WAVE.lifeMs));
   }
 
-  /** 程式畫的背景：遠山以半速捲動，地面每 240 px 一格，看得出鏡頭在動 */
-  private drawBackground() {
+  /** 程式畫的背景：每張地圖換顏色；遠山以半速捲動，地面每 240 px 一格，看得出鏡頭在動 */
+  private drawBackground(map: MapData) {
     const { height } = this.scale;
+    this.cameras.main.setBackgroundColor(map.colors.sky);
     const far = this.add.graphics().setScrollFactor(0.5);
-    far.fillStyle(0xa9c8d8);
+    far.fillStyle(map.colors.hills);
     for (let x = 0; x < WORLD_WIDTH; x += 360) far.fillEllipse(x + 180, GROUND_Y, 520, 360 + ((x / 360) % 3) * 80);
 
     const g = this.add.graphics();
     for (let x = 0; x < WORLD_WIDTH; x += 240) {
-      g.fillStyle((x / 240) % 2 ? 0x3b4a3f : 0x45574a);
+      g.fillStyle(map.colors.ground[(x / 240) % 2]);
       g.fillRect(x, GROUND_Y, 240, height - GROUND_Y);
     }
     g.lineStyle(4, 0x1b1b1b);
@@ -290,7 +358,7 @@ export class Stage extends Phaser.Scene {
     g.fillStyle(0x2a2f2b);
     g.fillRect(0, 0, WALL, GROUND_Y);
     g.fillRect(WORLD_WIDTH - WALL, 0, WALL, GROUND_Y);
-    for (const p of MAPS[0].platforms) {
+    for (const p of map.platforms) {
       g.fillStyle(0x7a6248).fillRect(p.x, p.top, p.w, PLATFORM_THICKNESS);
       g.lineStyle(4, 0x1b1b1b).strokeRect(p.x, p.top, p.w, PLATFORM_THICKNESS);
     }
