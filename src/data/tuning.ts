@@ -29,4 +29,15 @@ export const HERO = {
   jumpHeight: 300,
   doubleJumpHeight: 220,
   maxFallSpeed: 1500,
+  /** 跑＋X：滑行多久減速到 0 */
+  slideMs: 100,
+};
+
+/** 真空切劍氣：X3 判定開始時在主角前方生成，往前飛 */
+export const WAVE = {
+  distance: 480,
+  lifeMs: 400,
+  /** 生成位置相對主角腳底；x 是面向的前方 */
+  spawnX: 120,
+  spawnY: -120,
 };

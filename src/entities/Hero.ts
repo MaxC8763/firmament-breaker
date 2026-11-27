@@ -28,12 +28,13 @@ export class Hero extends Phaser.Physics.Arcade.Sprite {
     this.body.setGravityY(HERO.gravity).setMaxVelocityY(HERO.maxFallSpeed);
   }
 
-  /** 跑一個邏輯 tick，把結果交給物理 */
+  /** 跑一個邏輯 tick，把結果交給物理；回傳邏輯的結果，讓場景處理生成劍氣這類事件 */
   step(frame: InputFrame) {
     const out = tickHero(this.logic, { frame, onGround: this.body.blocked.down, vy: this.body.velocity.y });
     this.body.setVelocityX(out.vx);
     if (out.vy !== null) this.body.setVelocityY(out.vy);
     this.body.setAllowGravity(out.gravity);
+    return out;
   }
 
   /** 每幀一次：照邏輯的狀態換動畫與面向 */

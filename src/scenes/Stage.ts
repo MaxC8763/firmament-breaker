@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import type { Manifest } from '../data/manifest';
-import { GROUND_Y, TICK_HZ, WORLD_WIDTH } from '../data/tuning';
+import { GROUND_Y, TICK_HZ, WAVE, WORLD_WIDTH, ticks } from '../data/tuning';
 import { installDevTools } from '../dev/devTools';
 import { Hero } from '../entities/Hero';
 import { noButtons, type Button, type InputFrame } from '../input/input';
@@ -11,6 +11,13 @@ const MAX_DELTA_MS = 100;
 /** 兩端牆的厚度 */
 const WALL = 24;
 
+/** 飛行中的劍氣 */
+interface Wave {
+  sprite: Phaser.GameObjects.Sprite;
+  dir: 1 | -1;
+  age: number;
+}
+
 const KEYS: Record<Button, number> = {
   left: Phaser.Input.Keyboard.KeyCodes.LEFT,
   right: Phaser.Input.Keyboard.KeyCodes.RIGHT,
@@ -20,6 +27,7 @@ const KEYS: Record<Button, number> = {
 
 export class Stage extends Phaser.Scene {
   hero: Hero;
+  waves: Wave[];
   private keys: Record<Button, Phaser.Input.Keyboard.Key>;
   /** 還沒累積滿一個 tick 的時間 */
   private elapsed: number;
@@ -33,6 +41,7 @@ export class Stage extends Phaser.Scene {
   init() {
     this.elapsed = 0;
     this.pressed = noButtons();
+    this.waves = [];
   }
 
   create() {
@@ -71,10 +80,31 @@ export class Stage extends Phaser.Scene {
       // 剛按就放開的鍵，這個 tick 也算按著
       for (const b of Object.keys(KEYS) as Button[]) frame.held[b] ||= this.pressed[b];
       this.pressed = noButtons();
-      this.hero.step(frame);
+      const out = this.hero.step(frame);
       this.physics.world.singleStep();
+      if (out.spawnWave) this.spawnWave();
+      this.moveWaves();
     }
     this.hero.show();
+  }
+
+  private spawnWave() {
+    const dir = this.hero.logic.facing;
+    const sprite = this.add
+      .sprite(this.hero.x + dir * WAVE.spawnX, this.hero.y + WAVE.spawnY, 'art')
+      .setFlipX(dir < 0)
+      .play('effects/x3_wave');
+    this.waves.push({ sprite, dir, age: 0 });
+  }
+
+  /** 劍氣等速往前飛，lifeMs 後消失 */
+  private moveWaves() {
+    const speed = WAVE.distance / ticks(WAVE.lifeMs);
+    for (const w of this.waves) {
+      w.sprite.x += w.dir * speed;
+      if (++w.age >= ticks(WAVE.lifeMs)) w.sprite.destroy();
+    }
+    this.waves = this.waves.filter((w) => w.age < ticks(WAVE.lifeMs));
   }
 
   /** 程式畫的背景：遠山以半速捲動，地面每 240 px 一格，看得出鏡頭在動 */

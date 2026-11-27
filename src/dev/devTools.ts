@@ -20,7 +20,11 @@ export interface GameState {
     facing: number;
     vx: number;
     vy: number;
+    /** 正在出的招（x1／x2／x3），沒有是 null */
+    move: string | null;
   };
+  /** 飛行中的劍氣，x 是世界座標 */
+  waves: { x: number; y: number }[];
   cameraX: number;
   /** 邏輯跑過的 tick 數 */
   tick: number;
@@ -58,7 +62,9 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
           facing: hero.logic.facing,
           vx: hero.body.velocity.x,
           vy: hero.body.velocity.y,
+          move: hero.logic.attack?.move ?? null,
         },
+        waves: scene.waves.map((w) => ({ x: w.sprite.x, y: w.sprite.y })),
         cameraX: scene.cameras.main.scrollX,
         tick: hero.logic.tick,
       };

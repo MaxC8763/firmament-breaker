@@ -14,6 +14,15 @@ async function doubleTap(page: Page, key: string) {
   await page.keyboard.down(key);
 }
 
+/** 按 key 直到條件成立：機器忙、幀率很低時，一次按鍵可能剛好錯過接招的時機 */
+async function pressUntil(page: Page, key: string, fn: string) {
+  for (let i = 0; i < 10; i++) {
+    await page.keyboard.press(key);
+    if (await until(page, fn, 1_000).then(() => true, () => false)) return;
+  }
+  throw new Error(`按了 10 次 ${key}，${fn} 還是不成立`);
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
   await page.waitForFunction(() => document.body.dataset.game === 'ready');
@@ -53,4 +62,14 @@ test('按住 Z 起跳，腳底最高離地 300 px（±10）', async ({ page }) =
   const rise = groundY - (await page.evaluate(() => (window as any).__top));
   console.log(`跳躍高度 ${rise.toFixed(1)} px`);
   expect(Math.abs(rise - 300)).toBeLessThanOrEqual(10);
+});
+
+test('XXX：三招依序出完，X3 生成劍氣往前飛', async ({ page }) => {
+  for (const move of ['x1', 'x2', 'x3']) await pressUntil(page, 'x', `s.hero.move === '${move}'`);
+  await until(page, 's.waves.length === 1');
+  const from = (await state(page)).waves[0].x;
+  await until(page, `s.waves.length === 1 && s.waves[0].x > ${from + 200}`);
+  await page.screenshot({ path: shotPath('play-wave') });
+  await until(page, 's.waves.length === 0');
+  await until(page, "s.hero.state === 'Idle'");
 });
