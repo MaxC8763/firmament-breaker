@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { DOOR, LOW, MAPS } from '../src/data/maps';
 import { ENEMIES } from '../src/data/tuning';
 import { shotPath } from './env';
-import { pressOnce, rec, ready, resumeGame, state, until, untilRec, watch } from './helpers';
+import { pressOnce, rec, ready, resumeGame, state, until, untilRec, walkRightUntil, watch } from './helpers';
 
 // CI 的瀏覽器用軟體算繪，幀率低，整支測試給寬一點的時間
 test.describe.configure({ timeout: 60_000 });
@@ -22,11 +22,14 @@ async function shootMap(page: Page, name: string) {
   await resumeGame(page);
 }
 
-/** 記下關卡場景重開後第一幀的狀態（tick 從頭算）：MP 會自然回復，要在重開後馬上讀 */
+/**
+ * 記下關卡場景重開後第一幀的狀態：MP 會自然回復，要在重開後馬上讀。關卡每次建立都會換一個新的 window.__game，
+ * 用它判斷重開了沒（看 tick 變小不可靠：機器快的時候，重開前的 tick 可能只有個位數）
+ */
 const watchRestart = (page: Page) =>
   watch(page, `
-    if (r.last !== undefined && s.tick < r.last && !r.first) r.first = { map: s.map, hp: s.hero.hp, mp: s.hero.mp, x: s.hero.x, facing: s.hero.facing };
-    r.last = s.tick;
+    if (r.game && window.__game !== r.game && !r.first) r.first = { map: s.map, hp: s.hero.hp, mp: s.hero.mp, x: s.hero.x, facing: s.hero.facing };
+    r.game = window.__game;
   `);
 
 /** 等網頁畫 n 幀：關卡停住時 tick 不該前進 */
@@ -44,10 +47,8 @@ test('跳上低平台站穩，按 ↓＋Z 往下穿回地面、不會起跳', as
   // 第 1 張最左邊的平台離地 200，一段跳就上得去
   const p = MAPS[0].platforms[0];
   expect(p.top).toBe(LOW);
-  await page.keyboard.down('ArrowRight');
   // 停在平台左半邊：離第一隻小兵夠遠，它不會追過來
-  await until(page, `s.hero.x > ${p.x + 120}`);
-  await page.keyboard.up('ArrowRight');
+  await walkRightUntil(page, `s.hero.x > ${p.x + 120}`);
   await page.keyboard.down('z');
   await until(page, `s.hero.state === 'Idle' && Math.abs(s.hero.y - ${p.top}) < 1`);
   await page.keyboard.up('z');
@@ -121,9 +122,8 @@ test('平台上的 MP 道具：從底下走過吃不到，跳上去就吃到，M
   const item = MAPS[0].items.find((i) => i.kind === 'mp')!;
   expect(item.y).toBe(MAPS[0].platforms[0].top);
   const before = await state(page);
-  await page.keyboard.down('ArrowRight');
-  await until(page, `s.hero.x > ${item.x}`);
-  await page.keyboard.up('ArrowRight');
+  // 停在藥瓶正下方（在網頁裡每幀判斷，Playwright 慢的時候不會走過頭、跳起來碰不到）
+  await walkRightUntil(page, `s.hero.x > ${item.x}`);
   expect((await state(page)).items.some((i: any) => i.kind === 'mp')).toBe(true);
   await page.keyboard.down('z');
   await until(page, "!s.items.some((i) => i.kind === 'mp')");
