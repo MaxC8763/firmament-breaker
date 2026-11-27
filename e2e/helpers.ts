@@ -14,14 +14,15 @@ export const state = (page: Page) => page.evaluate(() => (window as any).__game.
 export const until = (page: Page, fn: string, timeout = 30_000) =>
   page.waitForFunction(`(() => { const s = window.__game.getState(); return ${fn}; })()`, null, { timeout });
 
-/** 在網頁裡每幀跑一次 body（s＝getState()、r＝紀錄），之後用 untilRec／rec 讀紀錄 */
+/** 在網頁裡每幀跑一次 body（s＝getState()、r＝紀錄），之後用 untilRec／rec 讀紀錄。開始新的 watch 時，舊的就停掉 */
 export async function watch(page: Page, body: string) {
   await page.evaluate((body) => {
     const w = window as any;
-    w.__rec = {};
+    const rec = (w.__rec = {});
     const f = new Function('s', 'r', body);
     const loop = () => {
-      f(w.__game.getState(), w.__rec);
+      if (w.__rec !== rec) return;
+      f(w.__game.getState(), rec);
       requestAnimationFrame(loop);
     };
     loop();
