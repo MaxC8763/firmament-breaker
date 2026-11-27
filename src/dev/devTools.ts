@@ -23,8 +23,9 @@ export interface GameState {
     vy: number;
     /** 正在出的招（x1／x2／x3），沒有是 null */
     move: string | null;
+    mp: number;
   };
-  enemies: { x: number; y: number; state: string; facing: number }[];
+  enemies: { x: number; y: number; state: string; facing: number; hp: number }[];
   /** 飛行中的劍氣，x 是世界座標 */
   waves: { x: number; y: number }[];
   cameraX: number;
@@ -65,8 +66,9 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
           vx: hero.body.velocity.x,
           vy: hero.body.velocity.y,
           move: hero.logic.attack?.move ?? null,
+          mp: hero.logic.mp,
         },
-        enemies: scene.grunts.map((g) => ({ x: g.x, y: g.y, state: GruntState[g.logic.state], facing: g.logic.facing })),
+        enemies: scene.grunts.map((g) => ({ x: g.x, y: g.y, state: GruntState[g.logic.state], facing: g.logic.facing, hp: g.logic.hp })),
         waves: scene.waves.map((w) => ({ x: w.sprite.x, y: w.sprite.y })),
         cameraX: scene.cameras.main.scrollX,
         tick: hero.logic.tick,

@@ -70,6 +70,7 @@ export interface HeroLogic {
   attack: Attack | null;
   /** 這次離地用過空中 X 了沒（停在 X1、X2、X3 都算一輪） */
   airAttackUsed: boolean;
+  mp: number;
 }
 
 export interface HeroInput {
@@ -148,6 +149,7 @@ export const newHero = (moves: HeroMoves): HeroLogic => ({
   landTicks: 0,
   attack: null,
   airAttackUsed: false,
+  mp: 0,
 });
 
 export function tickHero(h: HeroLogic, input: HeroInput): HeroOutput {

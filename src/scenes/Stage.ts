@@ -1,10 +1,22 @@
 import Phaser from 'phaser';
+import { addMp, newAttack, strike, type AttackInstance, type AttackSpec, type HitResult } from '../combat/attack';
+import { attackShape, overlaps, toWorld, type Box, type HitboxData } from '../combat/hitbox';
+import hitboxes from '../data/hitboxes.json';
 import type { Manifest } from '../data/manifest';
-import { GROUND_Y, GRUNT, TICK_HZ, WAVE, WORLD_WIDTH, ticks } from '../data/tuning';
+import { GROUND_Y, GRUNT, SLASH, TICK_HZ, WAVE, WORLD_WIDTH, ticks } from '../data/tuning';
 import { installDevTools } from '../dev/devTools';
 import { Grunt } from '../entities/Grunt';
+import { GruntState, hurtGrunt } from '../entities/gruntLogic';
 import { Hero } from '../entities/Hero';
+import { activeFrame, type Attack } from '../entities/heroLogic';
 import { noButtons, type Button, type InputFrame } from '../input/input';
+
+const HITBOXES = hitboxes as unknown as HitboxData;
+const SLASH_SPEC: AttackSpec = { maxHits: 1, intervalTicks: Infinity, damage: SLASH.damage, mp: SLASH.mp };
+const WAVE_SPEC: AttackSpec = { maxHits: WAVE.maxHits, intervalTicks: ticks(WAVE.intervalMs), damage: WAVE.damage, mp: WAVE.mp };
+
+/** 命中時發給開發模式的事件：(小兵, 結果, 這一段的傷害, 攻擊實例) */
+export const HIT_EVENT = 'hit';
 
 const TICK_MS = 1000 / TICK_HZ;
 /** 卡頓後最多補多少時間，避免一次補跑太多 tick */
@@ -17,6 +29,7 @@ interface Wave {
   sprite: Phaser.GameObjects.Sprite;
   dir: 1 | -1;
   age: number;
+  attack: AttackInstance;
 }
 
 const KEYS: Record<Button, number> = {
@@ -30,6 +43,10 @@ export class Stage extends Phaser.Scene {
   hero: Hero;
   grunts: Grunt[];
   waves: Wave[];
+  /** 正在出的招和它的攻擊實例；換招時舊的實例結束 */
+  private slash: { move: Attack; attack: AttackInstance } | null;
+  /** 命中停頓還剩幾個 tick：期間邏輯與物理都不前進 */
+  private hitstop: number;
   private keys: Record<Button, Phaser.Input.Keyboard.Key>;
   /** 還沒累積滿一個 tick 的時間 */
   private elapsed: number;
@@ -44,6 +61,8 @@ export class Stage extends Phaser.Scene {
     this.elapsed = 0;
     this.pressed = noButtons();
     this.waves = [];
+    this.slash = null;
+    this.hitstop = 0;
   }
 
   create() {
@@ -79,18 +98,64 @@ export class Stage extends Phaser.Scene {
     this.elapsed += Math.min(delta, MAX_DELTA_MS);
     while (this.elapsed >= TICK_MS) {
       this.elapsed -= TICK_MS;
+      if (this.hitstop > 0) {
+        this.hitstop--;
+        continue;
+      }
       const frame: InputFrame = { held: { ...held }, pressed: this.pressed };
       // 剛按就放開的鍵，這個 tick 也算按著
       for (const b of Object.keys(KEYS) as Button[]) frame.held[b] ||= this.pressed[b];
       this.pressed = noButtons();
-      const out = this.hero.step(frame);
-      for (const g of this.grunts) g.step(this.hero.x);
-      this.physics.world.singleStep();
-      if (out.spawnWave) this.spawnWave();
-      this.moveWaves();
+      this.tick(frame);
     }
     this.hero.show();
     for (const g of this.grunts) g.show();
+  }
+
+  /** 一個邏輯 tick：決策 → 物理一步 → 發射物 → 命中 */
+  private tick(frame: InputFrame) {
+    const out = this.hero.step(frame);
+    for (const g of this.grunts) g.step(this.hero.x);
+    this.physics.world.singleStep();
+    if (out.spawnWave) this.spawnWave();
+    this.moveWaves();
+    this.resolveHits();
+    for (const g of this.grunts) if (g.logic.state === GruntState.Gone) g.destroy();
+    this.grunts = this.grunts.filter((g) => g.logic.state !== GruntState.Gone);
+  }
+
+  /** 斬擊在判定格打小兵；劍氣整段飛行都會打 */
+  private resolveHits() {
+    const hero = this.hero;
+    const move = hero.logic.attack;
+    if (this.slash && this.slash.move !== move) {
+      this.slash.attack.ended = true;
+      this.slash = null;
+    }
+    if (move && !this.slash) this.slash = { move, attack: newAttack(SLASH_SPEC) };
+
+    const active = activeFrame(hero.logic);
+    const shape = active && attackShape(HITBOXES, active.move, active.air, active.file);
+    if (this.slash && shape?.type === 'rect') {
+      this.hitAll(this.slash.attack, toWorld(shape, hero.x, hero.y, hero.logic.facing), hero.logic.facing, true);
+    }
+    const waveBox = hitboxes.projectiles.x3_wave;
+    for (const w of this.waves) this.hitAll(w.attack, toWorld(waveBox, w.sprite.x, w.sprite.y, w.dir), w.dir, false);
+  }
+
+  /** 攻擊框碰到的每隻小兵各接觸一次；dir 是擊退方向，single＝單段斬擊（造成傷害時命中停頓） */
+  private hitAll(attack: AttackInstance, box: Box, dir: number, single: boolean) {
+    for (const g of this.grunts) {
+      if (g.logic.state === GruntState.Death || g.logic.state === GruntState.Gone) continue;
+      if (!overlaps(box, g.hurtbox())) continue;
+      const { result, mp } = strike(attack, g.logic, this.hero.logic.tick);
+      if (result === 'none') continue;
+      this.hero.logic.mp = addMp(this.hero.logic.mp, mp);
+      hurtGrunt(g.logic, dir);
+      g.flash();
+      if (single && result === 'damage') this.hitstop = ticks(SLASH.hitstopMs);
+      this.events.emit(HIT_EVENT, g, result satisfies HitResult, result === 'damage' ? attack.spec.damage : 0, attack);
+    }
   }
 
   private spawnWave() {
@@ -99,7 +164,7 @@ export class Stage extends Phaser.Scene {
       .sprite(this.hero.x + dir * WAVE.spawnX, this.hero.y + WAVE.spawnY, 'art')
       .setFlipX(dir < 0)
       .play('effects/x3_wave');
-    this.waves.push({ sprite, dir, age: 0 });
+    this.waves.push({ sprite, dir, age: 0, attack: newAttack(WAVE_SPEC) });
   }
 
   /** 劍氣等速往前飛，lifeMs 後消失 */
@@ -107,7 +172,9 @@ export class Stage extends Phaser.Scene {
     const speed = WAVE.distance / ticks(WAVE.lifeMs);
     for (const w of this.waves) {
       w.sprite.x += w.dir * speed;
-      if (++w.age >= ticks(WAVE.lifeMs)) w.sprite.destroy();
+      if (++w.age < ticks(WAVE.lifeMs)) continue;
+      w.sprite.destroy();
+      w.attack.ended = true;
     }
     this.waves = this.waves.filter((w) => w.age < ticks(WAVE.lifeMs));
   }

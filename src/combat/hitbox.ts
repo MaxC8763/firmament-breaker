@@ -44,7 +44,7 @@ export function attackShape(data: HitboxData, move: string, air: boolean, frame:
 }
 
 /** 放到腳底在 (x, y) 的世界座標；面向左時左右鏡射 */
-export function toWorld(r: Rect, x: number, y: number, facing: number): Box {
+export function toWorld(r: Omit<Rect, 'type'>, x: number, y: number, facing: number): Box {
   const left = facing > 0 ? x + r.x : x - r.x - r.w;
   return { left, right: left + r.w, top: y + r.y, bottom: y + r.y + r.h };
 }

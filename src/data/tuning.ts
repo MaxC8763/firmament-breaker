@@ -45,6 +45,19 @@ export const WAVE = {
   /** 生成位置相對主角腳底；x 是面向的前方 */
   spawnX: 120,
   spawnY: -120,
+  /** 對同一個敵人最多 5 段、每段間隔 50 ms */
+  maxHits: 5,
+  intervalMs: 50,
+  damage: 10,
+  mp: 1,
+};
+
+/** X1–X3 的斬擊：每個敵人 1 段 */
+export const SLASH = {
+  damage: 40,
+  mp: 5,
+  /** 命中瞬間的停頓 */
+  hitstopMs: 60,
 };
 
 /** 雜兵 A 小兵 */
@@ -53,6 +66,10 @@ export const GRUNT = {
   speed: 120,
   /** 主角在水平這個距離內就追 */
   chaseRange: 600,
+  hurtMs: 300,
+  knockback: 40,
+  /** 受擊閃白多久 */
+  flashMs: 100,
   /** 地圖上的位置：中段到右端 */
   spawnX: [1600, 2400, 3300],
 };

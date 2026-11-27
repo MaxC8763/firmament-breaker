@@ -89,3 +89,22 @@ test('開機有 3 隻小兵在待機；主角靠近到 600 px 內，小兵朝主
   await until(page, `s.enemies.some((e) => e.x < ${first - 20})`);
   await page.screenshot({ path: shotPath('play-grunt') });
 });
+
+test('XXX 打倒 1 隻小兵，MP 增加 16–20（斬擊 3 段各 5，加上劍氣 1–5 段各 1）', async ({ page }) => {
+  // 走到最近的小兵附近，等它追過來進到斬擊範圍
+  await page.keyboard.down('ArrowRight');
+  await until(page, 's.enemies.some((e) => e.x - s.hero.x < 400)');
+  await page.keyboard.up('ArrowRight');
+  await until(page, 's.enemies.some((e) => e.x - s.hero.x < 180)');
+  const before = await state(page);
+  const target = before.enemies.reduce((a: any, e: any) => (e.x < a.x ? e : a));
+  for (const move of ['x1', 'x2', 'x3']) await pressUntil(page, 'x', `s.hero.move === '${move}'`);
+  await until(page, 's.waves.length === 1');
+  await page.screenshot({ path: shotPath('play-combat') });
+  await until(page, `s.enemies.length === ${before.enemies.length - 1}`);
+  const after = await state(page);
+  const gained = after.hero.mp - before.hero.mp;
+  console.log(`打倒 x≈${Math.round(target.x)} 的小兵，MP +${gained}`);
+  expect(gained).toBeGreaterThanOrEqual(16);
+  expect(gained).toBeLessThanOrEqual(20);
+});
