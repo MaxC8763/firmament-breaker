@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { DOOR, LOW, MAPS } from '../src/data/maps';
 import { shotPath } from './env';
-import { pressOnce, rec, ready, state, until, untilRec, watch } from './helpers';
+import { pressOnce, rec, ready, resumeGame, state, until, untilRec, watch } from './helpers';
 
 // CI 的瀏覽器用軟體算繪，幀率低，整支測試給寬一點的時間
 test.describe.configure({ timeout: 60_000 });
@@ -18,7 +18,7 @@ async function shootMap(page: Page, name: string) {
   await until(page, 's.cameraX > 1915');
   await game(page, 'pause()');
   await page.screenshot({ path: shotPath(name) });
-  await game(page, 'resume()');
+  await resumeGame(page);
 }
 
 /** 記下關卡場景重開後第一幀的狀態（tick 從頭算）：MP 會自然回復，要在重開後馬上讀 */

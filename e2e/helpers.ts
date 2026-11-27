@@ -122,5 +122,11 @@ export const freezeWhenWaveFlies = (page: Page) =>
 export async function shootFrozen(page: Page, name: string) {
   await untilRec(page, 'r.frozen');
   await page.screenshot({ path: shotPath(name) });
+  await resumeGame(page);
+}
+
+/** 讓定格的關卡繼續：Phaser 4 的 resume 排到下一幀才生效，等關卡真的在跑再往下，不然緊接著按的鍵會在關卡還停著時被吃掉 */
+export async function resumeGame(page: Page) {
   await page.evaluate(() => (window as any).__game.resume());
+  await until(page, '!s.paused');
 }
