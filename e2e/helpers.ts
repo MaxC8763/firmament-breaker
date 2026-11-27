@@ -31,6 +31,29 @@ export const rec = (page: Page) => page.evaluate(() => (window as any).__rec);
 export const untilRec = (page: Page, fn: string) =>
   page.waitForFunction(`(() => { const r = window.__rec; return ${fn}; })()`, null, { timeout: 30_000 });
 
+/**
+ * 在網頁裡按住 → 往右走，cond（s＝getState()）成立的那一幀就放開：每幀判斷，Playwright 一來一回的延遲
+ * 不會讓主角多走一段（機器忙的時候，小兵可能在這段延遲裡追得太近）
+ */
+export async function walkRightUntil(page: Page, cond: string) {
+  await page.evaluate(
+    (cond) =>
+      new Promise<void>((done) => {
+        const w = window as any;
+        const ready = new Function('s', `return ${cond};`);
+        const key = (type: string) => window.dispatchEvent(new KeyboardEvent(type, { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 } as KeyboardEventInit));
+        key('keydown');
+        const loop = () => {
+          if (!ready(w.__game.getState())) return requestAnimationFrame(loop);
+          key('keyup');
+          done();
+        };
+        loop();
+      }),
+    cond,
+  );
+}
+
 /** 按一下 key，等條件成立；作弊鍵這類切換鍵只能按一下，多按會切回去 */
 export async function pressOnce(page: Page, key: string, fn: string) {
   await page.keyboard.press(key);
