@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
 import type { Manifest } from '../data/manifest';
-import { GROUND_Y, TICK_HZ, WAVE, WORLD_WIDTH, ticks } from '../data/tuning';
+import { GROUND_Y, GRUNT, TICK_HZ, WAVE, WORLD_WIDTH, ticks } from '../data/tuning';
 import { installDevTools } from '../dev/devTools';
+import { Grunt } from '../entities/Grunt';
 import { Hero } from '../entities/Hero';
 import { noButtons, type Button, type InputFrame } from '../input/input';
 
@@ -27,6 +28,7 @@ const KEYS: Record<Button, number> = {
 
 export class Stage extends Phaser.Scene {
   hero: Hero;
+  grunts: Grunt[];
   waves: Wave[];
   private keys: Record<Button, Phaser.Input.Keyboard.Key>;
   /** 還沒累積滿一個 tick 的時間 */
@@ -51,6 +53,7 @@ export class Stage extends Phaser.Scene {
     this.physics.disableUpdate();
 
     const manifest: Manifest = this.cache.json.get('manifest');
+    this.grunts = GRUNT.spawnX.map((x) => new Grunt(this, manifest, x));
     this.hero = new Hero(this, manifest);
     this.hero.show();
 
@@ -81,11 +84,13 @@ export class Stage extends Phaser.Scene {
       for (const b of Object.keys(KEYS) as Button[]) frame.held[b] ||= this.pressed[b];
       this.pressed = noButtons();
       const out = this.hero.step(frame);
+      for (const g of this.grunts) g.step(this.hero.x);
       this.physics.world.singleStep();
       if (out.spawnWave) this.spawnWave();
       this.moveWaves();
     }
     this.hero.show();
+    for (const g of this.grunts) g.show();
   }
 
   private spawnWave() {

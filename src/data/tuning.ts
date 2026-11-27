@@ -10,6 +10,9 @@ export const TICK_HZ = 60;
 /** 毫秒換成 tick 數 */
 export const ticks = (ms: number) => Math.round((ms * TICK_HZ) / 1000);
 
+/** 主角與敵人共用的重力 */
+export const GRAVITY = 3000;
+
 export const INPUT = {
   /** 同一個方向連按兩下的間隔在這之內，按著就是跑 */
   doubleTapMs: 250,
@@ -24,7 +27,7 @@ export const HERO = {
   runSpeed: 480,
   /** 空中轉向後、或不是跑跳時的水平速度 */
   airTurnSpeed: 300,
-  gravity: 3000,
+  gravity: GRAVITY,
   /** 起跳速度由高度在 60 Hz 步長下反推 */
   jumpHeight: 300,
   doubleJumpHeight: 220,
@@ -40,4 +43,14 @@ export const WAVE = {
   /** 生成位置相對主角腳底；x 是面向的前方 */
   spawnX: 120,
   spawnY: -120,
+};
+
+/** 雜兵 A 小兵 */
+export const GRUNT = {
+  hp: 120,
+  speed: 120,
+  /** 主角在水平這個距離內就追 */
+  chaseRange: 600,
+  /** 地圖上的位置：中段到右端 */
+  spawnX: [1600, 2400, 3300],
 };

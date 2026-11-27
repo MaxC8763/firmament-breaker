@@ -73,3 +73,19 @@ test('XXX：三招依序出完，X3 生成劍氣往前飛', async ({ page }) => 
   await until(page, 's.waves.length === 0');
   await until(page, "s.hero.state === 'Idle'");
 });
+
+test('開機有 3 隻小兵在待機；主角靠近到 600 px 內，小兵朝主角走過來', async ({ page }) => {
+  const s = await state(page);
+  expect(s.enemies).toHaveLength(3);
+  expect(s.enemies.every((e: any) => e.state === 'Idle' && e.y === s.groundY)).toBe(true);
+  const first = Math.min(...s.enemies.map((e: any) => e.x));
+  await doubleTap(page, 'ArrowRight');
+  await until(page, "s.enemies.some((e) => e.state === 'Walk')");
+  await page.keyboard.up('ArrowRight');
+  const t = await state(page);
+  const chaser = t.enemies.find((e: any) => e.state === 'Walk');
+  expect(chaser.facing).toBe(-1);
+  expect(Math.abs(chaser.x - t.hero.x)).toBeLessThanOrEqual(600);
+  await until(page, `s.enemies.some((e) => e.x < ${first - 20})`);
+  await page.screenshot({ path: shotPath('play-grunt') });
+});
