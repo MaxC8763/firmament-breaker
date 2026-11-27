@@ -35,6 +35,10 @@ export interface GameState {
     invincible: boolean;
   };
   enemies: { x: number; y: number; state: string; facing: number; hp: number }[];
+  /** 地圖上還沒被吃掉的道具 */
+  items: { kind: string; x: number; y: number }[];
+  /** 這張地圖打中敵人回了多少 MP（不含自然回復與道具；超過上限捨去的也算） */
+  mpFromHits: number;
   /** 飛行中的劍氣，x 是世界座標，fromX 是生成時的 x */
   waves: { x: number; y: number; fromX: number }[];
   /** 這一局生成過幾道劍氣 */
@@ -97,8 +101,10 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
     boxes.lineBetween(hero.x - 14, hero.y, hero.x + 14, hero.y);
     boxes.lineBetween(hero.x, hero.y - 14, hero.x, hero.y + 14);
   };
-  // 傷害數字與「已造成段數／上限」：飄起來再淡出
+  // 傷害數字與「已造成段數／上限」：飄起來再淡出。命中回復的 MP 不管顯示開著沒都要記
+  let mpFromHits = 0;
   const onHit = (g: Grunt, result: HitResult, damage: number, attack: AttackInstance) => {
+    if (result === 'damage') mpFromHits += attack.spec.mp;
     if (!shown) return;
     const count = attack.contacts.get(g.logic)?.count ?? 0;
     const label = `${result === 'damage' ? damage : '—'}  ${count}/${attack.spec.maxHits}`;
@@ -162,6 +168,8 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
           invincible: hero.logic.invincible,
         },
         enemies: scene.grunts.map((g) => ({ x: g.x, y: g.y, state: GruntState[g.logic.state], facing: g.logic.facing, hp: g.logic.hp })),
+        items: scene.items.map((i) => ({ kind: i.kind, x: i.sprite.x, y: i.sprite.y })),
+        mpFromHits,
         waves: scene.waves.map((w) => ({ x: w.sprite.x, y: w.sprite.y, fromX: w.fromX })),
         wavesSpawned: scene.wavesSpawned,
         devShown: shown,

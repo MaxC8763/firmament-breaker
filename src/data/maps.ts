@@ -12,6 +12,8 @@ export interface MapData {
   platforms: Platform[];
   /** 敵人的腳底 x；敵人只走地面 */
   enemies: { kind: 'grunt'; x: number }[];
+  /** 道具的腳底：放在地面（GROUND_Y）或平台的上緣 */
+  items: { kind: 'hp' | 'mp'; x: number; y: number }[];
   /** 程式畫的背景：天空、遠山、地面兩色 */
   colors: { sky: number; hills: number; ground: [number, number] };
 }
@@ -40,6 +42,10 @@ export const MAPS: MapData[] = [
       { kind: 'grunt', x: 2400 },
       { kind: 'grunt', x: 3300 },
     ],
+    items: [
+      { kind: 'mp', x: 960, y: LOW },
+      { kind: 'hp', x: 2880, y: LOW },
+    ],
     colors: { sky: 0xcfe3ef, hills: 0xa9c8d8, ground: [0x3b4a3f, 0x45574a] },
   },
   // 第 2 張：開始有高的平台
@@ -53,6 +59,10 @@ export const MAPS: MapData[] = [
     enemies: [
       { kind: 'grunt', x: 1500 },
       { kind: 'grunt', x: 2600 },
+    ],
+    items: [
+      { kind: 'hp', x: 1440, y: HIGH },
+      { kind: 'mp', x: 2400, y: LOW },
     ],
     colors: { sky: 0xf2dcc4, hills: 0xd9b48f, ground: [0x5a4632, 0x67513b] },
   },
@@ -68,6 +78,10 @@ export const MAPS: MapData[] = [
     enemies: [
       { kind: 'grunt', x: 1400 },
       { kind: 'grunt', x: 2200 },
+    ],
+    items: [
+      { kind: 'hp', x: 1200, y: HIGH },
+      { kind: 'mp', x: 2640, y: HIGH },
     ],
     colors: { sky: 0xd6d2ea, hills: 0xa9a2cf, ground: [0x3d3a52, 0x48445f] },
   },

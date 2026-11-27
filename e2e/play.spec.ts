@@ -92,7 +92,8 @@ test('XXX 打倒 1 隻小兵，MP 增加 16–20（斬擊 3 段各 5，加上劍
   await xxx(page, CLOSE_ENOUGH);
   await shootFrozen(page, 'play-combat');
   await until(page, `s.enemies.length === ${before.enemies.length - 1}`);
-  const gained = (await state(page)).hero.mp - before.hero.mp;
+  // MP 會自然回復：只看打中敵人回的 MP
+  const gained = (await state(page)).mpFromHits - before.mpFromHits;
   console.log(`打倒 1 隻小兵，MP +${gained}`);
   expect(gained).toBeGreaterThanOrEqual(16);
   expect(gained).toBeLessThanOrEqual(20);

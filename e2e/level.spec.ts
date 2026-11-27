@@ -112,3 +112,19 @@ test('第 3 張的門 → 關卡完成畫面（關卡停住）→ 按 Z 回到�
   expect((await rec(page)).first).toMatchObject({ map: 0, hp: 1000, mp: 0 });
   expect((await state(page)).complete).toBe(false);
 });
+
+test('平台上的 MP 道具：從底下走過吃不到，跳上去就吃到，MP 至少 +100', async ({ page }) => {
+  const item = MAPS[0].items.find((i) => i.kind === 'mp')!;
+  expect(item.y).toBe(MAPS[0].platforms[0].top);
+  const before = await state(page);
+  await page.keyboard.down('ArrowRight');
+  await until(page, `s.hero.x > ${item.x}`);
+  await page.keyboard.up('ArrowRight');
+  expect((await state(page)).items.some((i: any) => i.kind === 'mp')).toBe(true);
+  await page.keyboard.down('z');
+  await until(page, "!s.items.some((i) => i.kind === 'mp')");
+  await page.keyboard.up('z');
+  const gained = (await state(page)).hero.mp - before.hero.mp;
+  console.log(`吃到 MP 道具，MP +${gained}`);
+  expect(gained).toBeGreaterThanOrEqual(100);
+});

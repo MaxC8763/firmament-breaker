@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { ArtGroup } from '../data/manifest';
 import { GRAVITY, HERO, TICK_HZ, ticks } from '../data/tuning';
 import { frameOf, type Button } from '../input/input';
-import { activeFrame, HeroState, heroView, hurtHero, launchSpeed, newHero, tickHero, type HeroLogic, type HeroMoves } from './heroLogic';
+import { activeFrame, eatItem, HeroState, heroView, hurtHero, launchSpeed, newHero, tickHero, type HeroLogic, type HeroMoves } from './heroLogic';
 
 // 和佔位圖同樣的格數；測試只依賴這份，不讀美術檔
 const group = (frames: ArtGroup['frames']): ArtGroup => ({ canvas: [768, 512], fps: 12, loop: false, frames });
@@ -809,5 +809,54 @@ describe('單向平台與 coyote time', () => {
     expect(w.h.state).toBe(HeroState.Air);
     w.untilLanded();
     expect(w.y).toBe(0);
+  });
+});
+
+describe('MP 自然回復與道具', () => {
+  test('MP 每秒回 2 點，到上限就停', () => {
+    const w = new World();
+    idle(w, TICK_HZ);
+    expect(w.h.mp).toBe(HERO.mpPerSecond);
+    expect(HERO.mpPerSecond).toBe(2);
+    w.h.mp = HERO.mpMax - 1;
+    idle(w, TICK_HZ);
+    expect(w.h.mp).toBe(HERO.mpMax);
+  });
+
+  test('出招中照樣回 MP', () => {
+    const w = new World();
+    w.h.mp = 100;
+    w.step([], ['attack']);
+    for (let i = 1; i < TICK_HZ; i++) w.step(i % 10 ? [] : ['attack'], i % 10 ? [] : ['attack']);
+    expect(w.h.mp).toBe(102);
+  });
+
+  test('死亡時不回 MP', () => {
+    const w = new World();
+    w.h.mp = 100;
+    hurtHero(w.h, HERO.hpMax, 1);
+    expect(w.h.state).toBe(HeroState.Dead);
+    idle(w, TICK_HZ);
+    expect(w.h.mp).toBe(100);
+  });
+
+  test('道具：HP +300、MP +100，超過上限的部分捨去，滿了也照吃', () => {
+    const h = newHero(MOVES);
+    h.hp = 500;
+    expect(eatItem(h, 'hp')).toBe(true);
+    expect(h.hp).toBe(800);
+    expect(eatItem(h, 'hp')).toBe(true);
+    expect(h.hp).toBe(HERO.hpMax);
+    expect(eatItem(h, 'hp')).toBe(true);
+    h.mp = 250;
+    expect(eatItem(h, 'mp')).toBe(true);
+    expect(h.mp).toBe(HERO.mpMax);
+  });
+
+  test('死亡時碰到道具不吃', () => {
+    const h = newHero(MOVES);
+    hurtHero(h, HERO.hpMax, 1);
+    expect(eatItem(h, 'hp')).toBe(false);
+    expect(h.hp).toBe(0);
   });
 });

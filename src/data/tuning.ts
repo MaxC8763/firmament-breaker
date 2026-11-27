@@ -49,6 +49,8 @@ export const HERO = {
   airSlashGravity: 0.3,
   hpMax: 1000,
   mpMax: 300,
+  /** MP 自然回復：每秒幾點（暫停、命中停頓、死亡時不回） */
+  mpPerSecond: 2,
   hurtMs: 300,
   knockback: 120,
   /** 被打後無敵多久（含硬直） */
@@ -78,6 +80,9 @@ export const SLASH = {
   /** 命中瞬間的停頓 */
   hitstopMs: 60,
 };
+
+/** 地圖上的道具：碰到就吃掉，超過上限的部分捨去 */
+export const ITEM = { hp: 300, mp: 100 };
 
 /** 雜兵 A 小兵 */
 export const GRUNT = {

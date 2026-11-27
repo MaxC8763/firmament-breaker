@@ -9,12 +9,15 @@ import { installDevTools } from '../dev/devTools';
 import { Grunt } from '../entities/Grunt';
 import { gruntHarmful, GruntState, hurtGrunt } from '../entities/gruntLogic';
 import { Hero } from '../entities/Hero';
-import { activeFrame, HeroState, hurtHero, type Attack } from '../entities/heroLogic';
+import { activeFrame, eatItem, HeroState, hurtHero, type Attack } from '../entities/heroLogic';
 import { noButtons, type Button, type InputFrame } from '../input/input';
 
 const HITBOXES = hitboxes as unknown as HitboxData;
 const SLASH_SPEC: AttackSpec = { maxHits: 1, intervalTicks: Infinity, damage: SLASH.damage, mp: SLASH.mp };
 const WAVE_SPEC: AttackSpec = { maxHits: WAVE.maxHits, intervalTicks: ticks(WAVE.intervalMs), damage: WAVE.damage, mp: WAVE.mp };
+
+/** 道具被吃到的範圍（相對腳底）：和藥瓶的圖差不多大 */
+const ITEM_BOX = { x: -32, y: -88, w: 64, h: 88 };
 
 /** HUD 的位置與大小（畫面座標） */
 const HUD = { x: 48, hpY: 40, hpWidth: 480, mpY: 84, mpWidth: 360 };
@@ -54,6 +57,8 @@ export class Stage extends Phaser.Scene {
   complete: boolean;
   hero: Hero;
   grunts: Grunt[];
+  /** 地圖上還沒被吃掉的道具 */
+  items: { kind: 'hp' | 'mp'; sprite: Phaser.GameObjects.Sprite }[];
   waves: Wave[];
   /** 這一局生成過幾道劍氣 */
   wavesSpawned: number;
@@ -112,6 +117,12 @@ export class Stage extends Phaser.Scene {
     this.doorHint = this.add
       .text(DOOR.x, GROUND_Y - DOOR.h - 56, '↑', { fontFamily: 'sans-serif', fontSize: '72px', color: '#ffffff', stroke: '#1b1b1b', strokeThickness: 8 })
       .setOrigin(0.5);
+    this.items = map.items.map(({ kind, x, y }) => {
+      const g = manifest.groups[`items/${kind}`];
+      const [cw, ch] = g.canvas;
+      const [px, py] = g.pivot ?? [cw / 2, ch];
+      return { kind, sprite: this.add.sprite(x, y, 'art', `items/${kind}/${g.frames?.[0]?.file}`).setOrigin(px / cw, py / ch) };
+    });
     this.grunts = map.enemies.map((e) => new Grunt(this, manifest, e.x));
     this.hero = new Hero(this, manifest);
     this.hero.logic.hp = this.entry.hp;
@@ -190,6 +201,7 @@ export class Stage extends Phaser.Scene {
     this.moveWaves();
     this.resolveHits();
     this.contactDamage();
+    this.pickItems();
     for (const g of this.grunts) if (g.logic.state === GruntState.Gone) g.destroy();
     this.grunts = this.grunts.filter((g) => g.logic.state !== GruntState.Gone);
     // 站在開著的門前按 ↑：進下一張的入口；最後一張的門是關卡完成
@@ -237,6 +249,17 @@ export class Stage extends Phaser.Scene {
         .setDepth(951);
     text(height / 2 - 60, '關卡完成', 112);
     text(height / 2 + 70, '按 Z 再玩一次', 44);
+  }
+
+  /** 主角的 hurtbox 碰到道具就吃掉；平台上的道具要站上去（或從上面經過）才吃得到，從平台底下走過不算 */
+  private pickItems() {
+    const box = this.heroHurtbox();
+    const hero = this.hero;
+    this.items = this.items.filter(({ kind, sprite }) => {
+      if (hero.y > sprite.y + 1 || !overlaps(box, toWorld(ITEM_BOX, sprite.x, sprite.y, 1)) || !eatItem(hero.logic, kind)) return true;
+      sprite.destroy();
+      return false;
+    });
   }
 
   /** 小兵碰到主角的 hurtbox 就造成傷害；硬直中、待死亡的小兵不算 */

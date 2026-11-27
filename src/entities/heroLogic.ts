@@ -1,6 +1,7 @@
 // 主角的決策：不 import phaser。每個 tick 收輸入與著地狀態，決定狀態、要交給物理的速度、要顯示哪一格
+import { addMp } from '../combat/attack';
 import type { ArtFrame, ArtGroup } from '../data/manifest';
-import { GRAVITY, HERO, TICK_HZ, ticks } from '../data/tuning';
+import { GRAVITY, HERO, ITEM, TICK_HZ, ticks } from '../data/tuning';
 import {
   bufferPresses,
   direction,
@@ -216,6 +217,14 @@ export function hurtHero(h: HeroLogic, damage: number, dir: number): boolean {
   return true;
 }
 
+/** 吃道具：HP +300、MP +100，超過上限的部分捨去，滿了也照吃；死亡時不吃。回傳有沒有吃掉 */
+export function eatItem(h: HeroLogic, kind: 'hp' | 'mp'): boolean {
+  if (h.state === HeroState.Dead) return false;
+  if (kind === 'hp') h.hp = Math.min(HERO.hpMax, h.hp + ITEM.hp);
+  else h.mp = addMp(h.mp, ITEM.mp);
+  return true;
+}
+
 export function tickHero(h: HeroLogic, input: HeroInput): HeroOutput {
   const out = decide(h, input);
   h.lastVx = out.vx;
@@ -231,6 +240,8 @@ function decide(h: HeroLogic, input: HeroInput): HeroOutput {
   const dir = direction(f);
   if (h.invulnTicks > 0) h.invulnTicks--;
   if (h.coyoteTicks > 0) h.coyoteTicks--;
+  // MP 自然回復：邏輯有前進才回（暫停、命中停頓不跑 tick），死亡時不回
+  if (h.state !== HeroState.Dead && t % (TICK_HZ / HERO.mpPerSecond) === 0) h.mp = addMp(h.mp, 1);
   // 往滑行的方向被擋住（撞牆、到了地圖兩端），滑行就結束
   if (h.slideV > 0 && (h.facing > 0 ? input.blocked.right : input.blocked.left)) h.slideV = 0;
   // 地面滑行每個 tick 減速；按著反方向減速更快
