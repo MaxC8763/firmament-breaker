@@ -48,7 +48,12 @@ export interface GameState {
 
 declare global {
   interface Window {
-    __game?: { getState(): GameState };
+    __game?: {
+      getState(): GameState;
+      /** 暫停與繼續關卡場景（畫面照樣算繪）：瀏覽器測試用來定格截圖 */
+      pause(): void;
+      resume(): void;
+    };
   }
 }
 
@@ -144,5 +149,7 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
         tick: hero.logic.tick,
       };
     },
+    pause: () => scene.scene.pause(),
+    resume: () => scene.scene.resume(),
   };
 }

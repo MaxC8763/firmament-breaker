@@ -73,6 +73,21 @@ async function xxx(page: Page) {
   await page.waitForFunction(() => (window as any).__xxx, null, { timeout: 30_000 });
 }
 
+/** 劍氣飛出去 60 px 的那一幀把關卡暫停（畫面照樣算繪），截圖一定拍得到劍氣；截完由 shootFrozen 繼續 */
+const freezeWhenWaveFlies = (page: Page) =>
+  watch(page, `
+    if (!r.frozen && s.waves.length > 0 && s.waves[0].x - s.waves[0].fromX > 60) {
+      r.frozen = true;
+      window.__game.pause();
+    }
+  `);
+
+async function shootFrozen(page: Page, name: string) {
+  await untilRec(page, 'r.frozen');
+  await page.screenshot({ path: shotPath(name) });
+  await page.evaluate(() => (window as any).__game.resume());
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
   await page.waitForFunction(() => document.body.dataset.game === 'ready', null, { timeout: 30_000 });
@@ -151,11 +166,10 @@ test('XXX 打倒 1 隻小兵，MP 增加 16–20（斬擊 3 段各 5，加上劍
   // X1 打中時超過 187 px，X3 的斬擊就搆不到（框伸到 210、小兵半寬 66）
   await until(page, 's.enemies.some((e) => e.x - s.hero.x < 150)');
   const before = await state(page);
+  // 劍氣在飛的時候截一張戰鬥畫面（主角、小兵、劍氣、HUD）
+  await freezeWhenWaveFlies(page);
   await xxx(page);
-  // 劍氣在飛的時候截一張戰鬥畫面（主角、小兵、劍氣、HUD）；機器太忙錯過了也不影響判定
-  if (await until(page, 's.waves.length > 0 && s.waves[0].x - s.waves[0].fromX > 60', 5_000).then(() => true, () => false)) {
-    await page.screenshot({ path: shotPath('play-combat') });
-  }
+  await shootFrozen(page, 'play-combat');
   await until(page, `s.enemies.length === ${before.enemies.length - 1}`);
   const gained = (await state(page)).hero.mp - before.hero.mp;
   console.log(`打倒 1 隻小兵，MP +${gained}`);
@@ -190,10 +204,9 @@ test('開發模式：作弊鍵 1 MP 全滿、2 HP 全滿、3 無敵、` 切換�
   // 小兵近一點才出招：每段斬擊都會重新硬直、擊退，X1 打中到 X3 判定約 40 tick，小兵會被推遠約 90 px，
   // X1 打中時超過 187 px，X3 的斬擊就搆不到（框伸到 210、小兵半寬 66）
   await until(page, 's.enemies.some((e) => e.x - s.hero.x < 150)');
+  await freezeWhenWaveFlies(page);
   await xxx(page);
-  if (await until(page, 's.waves.length > 0 && s.waves[0].x - s.waves[0].fromX > 60', 5_000).then(() => true, () => false)) {
-    await page.screenshot({ path: shotPath('play-dev') });
-  }
+  await shootFrozen(page, 'play-dev');
   // 關掉無敵，往右走到被下一隻小兵撞到，再用 2 補滿
   await pressOnce(page, '3', '!s.hero.invincible');
   await page.keyboard.down('ArrowRight');
