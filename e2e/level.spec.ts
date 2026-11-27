@@ -79,14 +79,12 @@ test('在第 2 張死亡 → 從第 2 張的入口重來，HP／MP 是進入第 
   await game(page, 'enter(1, 640, 100)');
   await until(page, 's.map === 1');
   await shootMap(page, 'level-map2');
-  // 離開進入時的值：HP 1、MP 全滿，再關掉無敵往右撞小兵
+  // 離開進入時的值：HP 1、MP 全滿，再關掉無敵，站著等追過來的小兵撞上（截圖時小兵就在 300 px 內追著主角）
   await pressOnce(page, '3', '!s.hero.invincible');
   await game(page, 'setHp(1)');
   await pressOnce(page, '1', 's.hero.mp === 300');
   await watchRestart(page);
-  await page.keyboard.down('ArrowRight');
   await until(page, "s.hero.state === 'Dead'");
-  await page.keyboard.up('ArrowRight');
   await untilRec(page, 'r.first');
   const { first } = await rec(page);
   expect(first).toMatchObject({ map: 1, hp: 640, mp: 100 });
