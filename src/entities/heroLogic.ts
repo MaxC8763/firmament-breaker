@@ -331,8 +331,7 @@ export interface HeroView {
   frame?: string;
 }
 
-/** 上升、下落速度在這之內顯示頂點那一格 */
-// ponytail: 固定門檻，手繪的跳躍格多了再改成照速度分段
+/** 上升、下落速度在這之內顯示頂點那一格；固定門檻，手繪的跳躍格多了再改成照速度分段 */
 const APEX_VY = 300;
 
 export function heroView(h: HeroLogic): HeroView {
