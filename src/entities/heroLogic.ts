@@ -3,6 +3,7 @@ import { addMp } from '../combat/attack';
 import type { ArtFrame, ArtGroup } from '../data/manifest';
 import { GRAVITY, HERO, ITEM, TICK_HZ, ticks } from '../data/tuning';
 import {
+  anyButton,
   bufferPresses,
   direction,
   newRunTracker,
@@ -25,6 +26,10 @@ export enum HeroState {
   Hurt,
   /** HP 歸零，播完死亡動畫就要求重來 */
   Dead,
+  /** 不動太久：打盹轉場接著打盹循環 */
+  Doze,
+  /** 打盹中按了遊戲鍵：播完驚醒才能行動 */
+  Wake,
 }
 
 /** 站在地上、腳下沒了就會往下掉的狀態 */
@@ -92,8 +97,10 @@ export interface HeroLogic {
   airVy: number;
   hp: number;
   mp: number;
-  /** 目前狀態經過的 tick（受擊、死亡） */
+  /** 目前狀態經過的 tick（受擊、死亡、打盹、驚醒） */
   stateTicks: number;
+  /** 在地面待機、沒按任何遊戲鍵經過的 tick；滿 dozeMs 就打盹 */
+  idleTicks: number;
   /** 受擊後的無敵還剩幾個 tick */
   invulnTicks: number;
   /** 被擊退的方向 */
@@ -195,6 +202,7 @@ export const newHero = (moves: HeroMoves): HeroLogic => ({
   hp: HERO.hpMax,
   mp: 0,
   stateTicks: 0,
+  idleTicks: 0,
   invulnTicks: 0,
   knockDir: 0,
   invincible: false,
@@ -240,6 +248,7 @@ function decide(h: HeroLogic, input: HeroInput): HeroOutput {
   const dir = direction(f);
   if (h.invulnTicks > 0) h.invulnTicks--;
   if (h.coyoteTicks > 0) h.coyoteTicks--;
+  if (h.state !== HeroState.Idle || anyButton(f)) h.idleTicks = 0;
   // MP 自然回復：邏輯有前進才回（暫停、命中停頓不跑 tick），死亡時不回
   if (h.state !== HeroState.Dead && t % (TICK_HZ / HERO.mpPerSecond) === 0) h.mp = addMp(h.mp, 1);
   // 往滑行的方向被擋住（撞牆、到了地圖兩端），滑行就結束
@@ -258,6 +267,9 @@ function decide(h: HeroLogic, input: HeroInput): HeroOutput {
         if (input.onGround) h.doubleJumped = h.airAttackUsed = false;
       }
       return { vx: h.knockDir * KNOCK_SPEED, vy: null, gravity: true };
+    case HeroState.Doze:
+    case HeroState.Wake:
+      return doze(h, f);
   }
 
   if (h.state === HeroState.Attack) {
@@ -305,8 +317,24 @@ function decide(h: HeroLogic, input: HeroInput): HeroOutput {
   if (dir) h.facing = dir > 0 ? 1 : -1;
   h.state = !dir ? HeroState.Idle : h.run.runDir === dir ? HeroState.Run : HeroState.Walk;
   if (dir) h.landTicks = 0;
+  // 不動 10 秒就打盹
+  if (h.state === HeroState.Idle && ++h.idleTicks >= ticks(HERO.dozeMs)) {
+    h.state = HeroState.Doze;
+    h.stateTicks = 0;
+  }
   const speed = h.state === HeroState.Run ? HERO.runSpeed : HERO.walkSpeed;
   return { vx: dir * speed, vy: null, gravity: true };
+}
+
+/** 打盹：按任何遊戲鍵就驚醒；打盹與驚醒期間按的鍵留在預先輸入裡（不過期），驚醒後照常生效 */
+function doze(h: HeroLogic, f: InputFrame): HeroOutput {
+  for (const b of h.buffer) b.tick = h.tick;
+  h.stateTicks++;
+  if (h.state === HeroState.Doze && anyButton(f)) {
+    h.state = HeroState.Wake;
+    h.stateTicks = 0;
+  } else if (h.state === HeroState.Wake && h.stateTicks >= lengthOf(h.moves['hero/wake'])) h.state = HeroState.Idle;
+  return { vx: 0, vy: null, gravity: true };
 }
 
 /** 從跑速開始滑行：等減速，滑 brakeDistance 停下 */
@@ -473,6 +501,13 @@ export function heroView(h: HeroLogic): HeroView {
     case HeroState.Slide:
       // 跑步煞車還沒有圖，先借用落地格
       return jump('land');
+    case HeroState.Doze: {
+      // 打盹轉場播完才進打盹循環（循環交給薄殼播）
+      const into = frameAt(h.moves['hero/doze_in'], h.stateTicks);
+      return into ? { anim: 'hero/doze_in', frame: into.file } : { anim: 'hero/doze' };
+    }
+    case HeroState.Wake:
+      return { anim: 'hero/wake', frame: frameAt(h.moves['hero/wake'], h.stateTicks)?.file ?? h.moves['hero/wake'].frames?.at(-1)?.file };
     case HeroState.Walk:
       return { anim: 'hero/walk' };
     case HeroState.Run:

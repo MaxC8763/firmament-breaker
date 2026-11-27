@@ -32,9 +32,10 @@ const watchRestart = (page: Page) =>
 const frames = (page: Page, n: number) =>
   page.evaluate((n) => new Promise((done) => { const f = () => (--n > 0 ? requestAnimationFrame(f) : done(null)); requestAnimationFrame(f); }), n);
 
-/** 站到門前 */
+/** 站到門前；先按一下 ↓（單按沒有作用）：站著不動太久的主角在打盹，按了才會醒 */
 async function atDoor(page: Page) {
   await game(page, `placeHero(${DOOR.x})`);
+  await page.keyboard.press('ArrowDown');
   await until(page, `s.hero.state === 'Idle' && Math.abs(s.hero.x - ${DOOR.x}) < 1`);
 }
 
@@ -152,4 +153,18 @@ test('暫停選單：Esc 停住關卡、再按 Esc 繼續；選「從關卡開�
   await untilRec(page, 'r.first');
   expect((await rec(page)).first).toMatchObject({ map: 0, hp: 1000, mp: 0 });
   expect((await state(page)).paused).toBe(false);
+});
+
+test('不動 10 秒進入打盹（頭上冒 Zzz），按 → 驚醒後往右走', async ({ page }) => {
+  await until(page, "s.hero.anim === 'hero/doze'", 45_000);
+  await page.screenshot({ path: shotPath('level-doze') });
+  const { x } = (await state(page)).hero;
+  await watch(page, `
+    if (s.hero.state === 'Wake') r.woke = true;
+    if (r.woke && s.hero.state === 'Walk') r.walked = true;
+  `);
+  await page.keyboard.down('ArrowRight');
+  await untilRec(page, 'r.walked');
+  await until(page, `s.hero.x > ${x + 30}`);
+  await page.keyboard.up('ArrowRight');
 });

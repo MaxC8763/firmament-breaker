@@ -231,9 +231,10 @@ export class Stage extends Phaser.Scene {
     this.pickItems();
     for (const g of this.grunts) if (g.logic.state === GruntState.Gone) g.destroy();
     this.grunts = this.grunts.filter((g) => g.logic.state !== GruntState.Gone);
-    // 站在開著的門前按 ↑：進下一張的入口；最後一張的門是關卡完成
+    // 站在開著的門前按 ↑：進下一張的入口；最後一張的門是關卡完成。打盹中按 ↑ 只會驚醒
     const hero = this.hero;
-    if (frame.pressed.up && hero.logic.state !== HeroState.Dead && hero.body.blocked.down && Math.abs(hero.x - DOOR.x) <= DOOR.w / 2 && this.isDoorOpen()) {
+    const awake = ![HeroState.Dead, HeroState.Doze, HeroState.Wake].includes(hero.logic.state);
+    if (frame.pressed.up && awake && hero.body.blocked.down && Math.abs(hero.x - DOOR.x) <= DOOR.w / 2 && this.isDoorOpen()) {
       const next = nextEntry('door', this.entry, hero.logic);
       if (next) this.leave(next);
       else this.finish();

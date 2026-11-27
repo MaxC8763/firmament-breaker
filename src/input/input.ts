@@ -20,6 +20,9 @@ export function frameOf(held: Button[] = [], pressed: Button[] = []): InputFrame
   return f;
 }
 
+/** 這個 tick 有沒有按著任何遊戲鍵（剛按下的也算按著） */
+export const anyButton = (f: InputFrame) => (Object.keys(f.held) as Button[]).some((b) => f.held[b] || f.pressed[b]);
+
 /** 水平方向：只按右 1、只按左 −1，都沒按或兩個都按 0 */
 export const direction = (f: InputFrame) => (f.held.right ? 1 : 0) - (f.held.left ? 1 : 0);
 

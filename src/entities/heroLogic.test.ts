@@ -51,7 +51,19 @@ const MOVES: HeroMoves = {
     { file: 'death_02', hold: 2 },
     { file: 'death_03', hold: 6 },
   ]),
+  // 打盹轉場 3＋3＋4 格＝50 tick；驚醒 1＋1 格＝10 tick（約 170 ms）
+  'hero/doze_in': group([
+    { file: 'doze_in_00', hold: 3 },
+    { file: 'doze_in_01', hold: 3 },
+    { file: 'doze_in_02', hold: 4 },
+  ]),
+  'hero/doze': { ...group([{ file: 'doze_00', hold: 8 }, { file: 'doze_01', hold: 8 }]), loop: true },
+  'hero/wake': group([
+    { file: 'wake_00', hold: 1 },
+    { file: 'wake_01', hold: 1 },
+  ]),
 };
+const WAKE = 10;
 const X1 = { startup: 5, active: 10, recovery: 10 };
 const X3 = { startup: 10, active: 10, recovery: 20 };
 
@@ -858,5 +870,57 @@ describe('MP 自然回復與道具', () => {
     hurtHero(h, HERO.hpMax, 1);
     expect(eatItem(h, 'hp')).toBe(false);
     expect(h.hp).toBe(0);
+  });
+});
+
+describe('待機與打盹', () => {
+  const DOZE = ticks(HERO.dozeMs);
+  /** 在地面站著不動到打盹 */
+  const dozing = () => {
+    const w = new World();
+    idle(w, DOZE);
+    return w;
+  };
+
+  test('在地面待機、不動 10 秒就打盹；按了鍵就重算', () => {
+    const w = new World();
+    idle(w, DOZE - 1);
+    expect(w.h.state).toBe(HeroState.Idle);
+    w.step(['left'], ['left']);
+    idle(w, DOZE - 1);
+    expect(w.h.state).toBe(HeroState.Idle);
+    w.step();
+    expect(w.h.state).toBe(HeroState.Doze);
+    // 先播打盹轉場，播完才是打盹循環
+    expect(heroView(w.h).anim).toBe('hero/doze_in');
+    idle(w, 50);
+    expect(heroView(w.h)).toEqual({ anim: 'hero/doze' });
+  });
+
+  test('打盹中按 → 先驚醒（約 170 ms，期間不動），驚醒後照按著的方向走', () => {
+    const w = dozing();
+    w.step(['right'], ['right']);
+    expect(w.h.state).toBe(HeroState.Wake);
+    for (let i = 1; i < WAKE; i++) expect(w.step(['right']).vx).toBe(0);
+    w.step(['right']);
+    expect(w.h.state).toBe(HeroState.Idle);
+    expect(w.step(['right']).vx).toBe(HERO.walkSpeed);
+    expect(w.h.state).toBe(HeroState.Walk);
+  });
+
+  test('打盹中按 Z：驚醒後才起跳（按鍵留到驚醒後執行）', () => {
+    const w = dozing();
+    w.step(['jump'], ['jump']);
+    for (let i = 0; i < WAKE; i++) w.step();
+    expect(w.y).toBe(0);
+    w.step();
+    expect(w.h.state).toBe(HeroState.Air);
+    expect(w.vy).toBeLessThan(0);
+  });
+
+  test('打盹中被打直接受擊', () => {
+    const w = dozing();
+    expect(hurtHero(w.h, 50, -1)).toBe(true);
+    expect(w.h.state).toBe(HeroState.Hurt);
   });
 });
