@@ -176,10 +176,11 @@ export function installDevTools(scene: Stage, manifest: Manifest) {
         paused: scene.scene.isPaused(),
       };
     },
-    pause: () => scene.scene.pause(),
-    resume: () => scene.scene.resume(),
-    setHp: (hp) => (hero.logic.hp = hp),
-    enter: (map, hp = hero.logic.hp, mp = hero.logic.mp) => scene.scene.restart({ map, hp, mp }),
+    // 除錯函式都不回傳值：Playwright 會把 evaluate 的回傳值序列化傳回測試，ScenePlugin 這種大物件要花好幾秒，期間遊戲照跑
+    pause: () => void scene.scene.pause(),
+    resume: () => void scene.scene.resume(),
+    setHp: (hp) => void (hero.logic.hp = hp),
+    enter: (map, hp = hero.logic.hp, mp = hero.logic.mp) => void scene.scene.restart({ map, hp, mp }),
     placeHero: (x) => hero.body.reset(x, GROUND_Y),
   };
 }
